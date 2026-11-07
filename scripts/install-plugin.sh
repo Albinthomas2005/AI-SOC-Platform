@@ -14,6 +14,7 @@ DASHBOARD_URL="${DASHBOARD_URL:-https://localhost:5601}"
 DASHBOARD_HEALTH_URL="${DASHBOARD_HEALTH_URL:-${DASHBOARD_URL%/}/api/status}"
 DASHBOARD_OSD_VERSION="${DASHBOARD_OSD_VERSION:-}"
 MANUAL_INSTALL="${MANUAL_INSTALL:-0}"
+DEBUG="${DEBUG:-0}"
 PLUGIN_ID=wazuh
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,6 +34,17 @@ PLUGIN_OWNER_UID=""
 PLUGIN_OWNER_GID=""
 INSTALLER_SOURCE=""
 INSTALLER_ARCHIVE_DIR=""
+
+CHECK_ONLY=0
+if [[ "${1:-}" == "--check" ]]; then
+  CHECK_ONLY=1
+  RUN_ID=""
+elif [[ $# -gt 1 ]]; then
+  echo "Usage: $0 [RUN_ID|--check]" >&2
+  exit 2
+else
+  RUN_ID="${1:-}"
+fi
 
 run_privileged() {
   if (( EUID == 0 )); then
@@ -69,18 +81,36 @@ trap cleanup_temp EXIT
 
 is_executable_path() {
   local path="$1"
-  if [[ -x "$path" && ! -d "$path" ]]; then
-    return 0
+  local path_dir
+  local status
+  path_dir="$(dirname "$path")"
+  if [[ ! -r "$path_dir" || ! -x "$path_dir" ]]; then
+    if [[ "$DEBUG" == "1" ]]; then
+      printf 'DEBUG: candidate %s; directory inaccessible, using sudo test -x\n' "$path" >&2
+    fi
+    if sudo test -x "$path"; then
+      if sudo test -f "$path"; then
+        status=0
+      else
+        status=$?
+      fi
+    else
+      status=$?
+    fi
+  elif [[ -x "$path" && -f "$path" ]]; then
+    status=0
+  else
+    status=$?
   fi
-  if command -v sudo >/dev/null 2>&1 && sudo test -x "$path" && sudo test ! -d "$path"; then
-    return 0
+  if [[ "$DEBUG" == "1" ]]; then
+    printf 'DEBUG: candidate check %s exit=%s\n' "$path" "$status" >&2
   fi
-  return 1
+  (( status == 0 ))
 }
 
 find_plugin_installer() {
   local candidate=""
-  local candidates_file="$ARTIFACT_DIR/plugin-binaries.txt"
+  local candidates=""
   local bin_contents
 
   for candidate in \
@@ -93,29 +123,51 @@ find_plugin_installer() {
     fi
   done
 
-  local plain_find_status=0
-  find "$PLUGIN_BIN_DIR" -maxdepth 1 -type f -name '*plugin*' -perm /111 -print 2>/dev/null > "$candidates_file" || plain_find_status=$?
-  if { [[ ! -s "$candidates_file" ]] || (( plain_find_status != 0 )); } && command -v sudo >/dev/null 2>&1; then
-    sudo find "$PLUGIN_BIN_DIR" -maxdepth 1 -type f -name '*plugin*' -perm /111 -print 2>/dev/null > "$candidates_file" || true
+  if candidates="$(sudo find "$PLUGIN_BIN_DIR" -maxdepth 1 -type f -name '*plugin*' -print 2>/dev/null)"; then
+    if [[ "$DEBUG" == "1" ]]; then
+      echo 'DEBUG: sudo find plugin candidates exit=0' >&2
+    fi
+  else
+    local find_status=$?
+    if [[ "$DEBUG" == "1" ]]; then
+      printf 'DEBUG: sudo find %s exit=%s\n' "$PLUGIN_BIN_DIR" "$find_status" >&2
+    fi
   fi
   while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
     if is_executable_path "$candidate"; then
       PLUGIN_CLI="$candidate"
       INSTALLER_SOURCE="$candidate"
       return 0
     fi
-  done < "$candidates_file"
+  done <<< "$candidates"
 
-  candidate="$(command -v opensearch-dashboards-plugin 2>/dev/null || true)"
+  local path_lookup_status=0
+  if candidate="$(command -v opensearch-dashboards-plugin 2>/dev/null)"; then
+    :
+  else
+    path_lookup_status=$?
+    candidate=""
+  fi
+  if [[ "$DEBUG" == "1" ]]; then
+    printf 'DEBUG: PATH lookup opensearch-dashboards-plugin exit=%s\n' "$path_lookup_status" >&2
+  fi
   if [[ -z "$candidate" ]] && command -v sudo >/dev/null 2>&1; then
-    candidate="$(sudo sh -c 'command -v opensearch-dashboards-plugin' 2>/dev/null || true)"
+    if candidate="$(sudo sh -c 'command -v opensearch-dashboards-plugin' 2>/dev/null)"; then
+      path_lookup_status=0
+    else
+      path_lookup_status=$?
+      candidate=""
+    fi
+    if [[ "$DEBUG" == "1" ]]; then
+      printf 'DEBUG: sudo PATH lookup opensearch-dashboards-plugin exit=%s\n' "$path_lookup_status" >&2
+    fi
   fi
   if [[ -n "$candidate" ]] && is_executable_path "$candidate"; then
     PLUGIN_CLI="$candidate"
     INSTALLER_SOURCE="PATH: $candidate"
     return 0
   fi
-
   echo "No executable plugin installer was found. Contents of $PLUGIN_BIN_DIR:" >&2
   if bin_contents="$(ls -la "$PLUGIN_BIN_DIR" 2>&1)"; then
     printf '%s\n' "$bin_contents" >&2
@@ -135,6 +187,75 @@ read_owner_ids() {
   elif command -v sudo >/dev/null 2>&1 && ids="$(sudo stat -c '%u:%g' "$path" 2>/dev/null)"; then
     printf '%s' "$ids"
   else
+    return 1
+  fi
+}
+
+check_dashboard_version() {
+  local repo_version content version source candidate candidates output pkg_version
+  repo_version="$(python3 - "$REPO_ROOT/wazuh-dashboard/plugins/main/package.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as manifest:
+    print(json.load(manifest)["pluginPlatform"]["version"])
+PY
+)"
+  version=""
+  source=""
+  if content="$(cat "$DASHBOARD_PACKAGE" 2>/dev/null)"; then
+    version="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("version", ""))' <<<"$content" 2>/dev/null || true)"
+    [[ -n "$version" ]] && source="$DASHBOARD_PACKAGE"
+  elif content="$(sudo cat "$DASHBOARD_PACKAGE" 2>/dev/null)"; then
+    version="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("version", ""))' <<<"$content" 2>/dev/null || true)"
+    [[ -n "$version" ]] && source="$DASHBOARD_PACKAGE (sudo read)"
+  fi
+
+  if [[ -z "$version" ]]; then
+    candidates="$(sudo find "$DASHBOARD_HOME" -maxdepth 2 -type f -name package.json -print 2>/dev/null || true)"
+    while IFS= read -r candidate; do
+      [[ -n "$candidate" && "$candidate" != "$DASHBOARD_PACKAGE" ]] || continue
+      if content="$(cat "$candidate" 2>/dev/null)"; then
+        :
+      elif content="$(sudo cat "$candidate" 2>/dev/null)"; then
+        :
+      else
+        continue
+      fi
+      version="$(python3 -c 'import json,sys; d=json.load(sys.stdin); n=str(d.get("name", "")).lower().replace("_", "-"); print(d.get("version", "") if isinstance(d, dict) and "opensearch-dashboard" in n else "")' <<<"$content" 2>/dev/null || true)"
+      if [[ -n "$version" ]]; then
+        source="$candidate"
+        break
+      fi
+    done <<< "$candidates"
+  fi
+
+  if [[ -z "$version" ]] && sudo test -x "$DASHBOARD_HOME/bin/opensearch-dashboards"; then
+    if output="$(run_as_plugin_owner "$DASHBOARD_HOME/bin/opensearch-dashboards" --version 2>&1)"; then
+      version="$(python3 -c 'import re,sys; m=re.search(r"(?<![0-9])([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)", sys.stdin.read()); print(m.group(1) if m else "")' <<<"$output")"
+      [[ -n "$version" ]] && source="$DASHBOARD_HOME/bin/opensearch-dashboards --version"
+    fi
+  fi
+
+  if [[ -z "$version" ]]; then
+    if command -v dpkg-query >/dev/null 2>&1; then
+      pkg_version="$(dpkg-query -W -f='${Version}' wazuh-dashboard 2>/dev/null || true)"
+    elif command -v rpm >/dev/null 2>&1; then
+      pkg_version="$(rpm -q --qf '%{VERSION}-%{RELEASE}' wazuh-dashboard 2>/dev/null || true)"
+    else
+      pkg_version=""
+    fi
+    [[ -n "$pkg_version" ]] && printf 'Wazuh Dashboard package version (not OpenSearch Dashboards): %s\n' "$pkg_version"
+    version="$DASHBOARD_OSD_VERSION"
+    [[ -n "$version" ]] && source='DASHBOARD_OSD_VERSION (operator supplied)'
+  fi
+
+  if [[ -z "$version" ]]; then
+    echo 'Cannot determine OpenSearch Dashboards version from package.json, the Dashboard CLI, or DASHBOARD_OSD_VERSION.' >&2
+    return 1
+  fi
+  printf 'Dashboard OpenSearch Dashboards version: %s (source: %s)\nRepository target version: %s\n' "$version" "$source" "$repo_version"
+  if [[ "$version" != "$repo_version" ]]; then
+    echo "Dashboard version mismatch: found $version, repository requires $repo_version." >&2
     return 1
   fi
 }
@@ -176,6 +297,47 @@ on_error() {
   exit "$status"
 }
 trap 'on_error $?' ERR
+
+if command -v sudo >/dev/null 2>&1; then
+  echo "Checking sudo credentials before inspecting the Dashboard installation."
+  if ! sudo -v; then
+    echo "Could not validate sudo access; installer detection cannot inspect protected Dashboard files." >&2
+    exit 1
+  fi
+elif (( EUID != 0 )); then
+  echo "sudo is required to inspect the protected Dashboard installation." >&2
+  exit 1
+fi
+
+if (( CHECK_ONLY )); then
+  if [[ -d "$PLUGIN_DIR" ]]; then
+    OWNER_IDS="$(read_owner_ids "$PLUGIN_DIR")" || {
+      echo "Could not determine ownership of $PLUGIN_DIR." >&2
+      exit 1
+    }
+  else
+    OWNER_IDS="$(read_owner_ids "$PLUGIN_ROOT")" || {
+      echo "Could not determine ownership of $PLUGIN_ROOT." >&2
+      exit 1
+    }
+  fi
+  PLUGIN_OWNER_UID="${OWNER_IDS%%:*}"
+  PLUGIN_OWNER_GID="${OWNER_IDS##*:}"
+  PLUGIN_OWNER_ENTRY="$(getent passwd "$PLUGIN_OWNER_UID" || true)"
+  PLUGIN_OWNER="${PLUGIN_OWNER_ENTRY%%:*}"
+  if [[ -z "$PLUGIN_OWNER" ]]; then
+    echo "Could not map plugin directory owner UID $PLUGIN_OWNER_UID to a user." >&2
+    exit 1
+  fi
+  echo "Plugin directory owner: $PLUGIN_OWNER (UID:GID $PLUGIN_OWNER_UID:$PLUGIN_OWNER_GID)"
+  check_dashboard_version || exit 1
+  if ! find_plugin_installer; then
+    echo 'Self-test failed: no installer found.' >&2
+    exit 1
+  fi
+  printf 'Self-test passed. Installer: %s\nPlugin directory owner: %s\n' "$PLUGIN_CLI" "$PLUGIN_OWNER"
+  exit 0
+fi
 
 if [[ $# -gt 1 ]]; then
   echo "Usage: $0 [RUN_ID]" >&2
