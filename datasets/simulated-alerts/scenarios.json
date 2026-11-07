@@ -1,0 +1,195 @@
+[
+  {
+    "name": "SYNTHETIC: SSH brute force",
+    "alert": {
+      "@timestamp": "2026-11-01T09:00:00Z",
+      "rule": {
+        "id": "5710",
+        "level": 10,
+        "description": "Synthetic repeated SSH authentication failures",
+        "mitre": { "id": ["T1110.001"], "tactic": ["Credential Access"] }
+      },
+      "agent": { "id": "901" },
+      "data": {
+        "srcip": "198.51.100.21",
+        "dstport": "22",
+        "protocol": "ssh",
+        "authentication_result": "failed"
+      }
+    },
+    "expected_mitre": "T1110.001",
+    "must_mention": ["T1110.001", "SSH", "failed"],
+    "must_not_claim": ["confirmed attack", "successful breach"]
+  },
+  {
+    "name": "SYNTHETIC: Multiple failed logins",
+    "alert": {
+      "@timestamp": "2026-11-01T09:05:00Z",
+      "rule": {
+        "id": "5712",
+        "level": 8,
+        "description": "Synthetic account has multiple failed login attempts",
+        "mitre": { "id": ["T1110"], "tactic": ["Credential Access"] }
+      },
+      "agent": { "id": "902" },
+      "data": {
+        "srcip": "203.0.113.44",
+        "authentication_result": "failed",
+        "action": "login"
+      }
+    },
+    "expected_mitre": "T1110",
+    "must_mention": ["T1110", "multiple", "failed login"],
+    "must_not_claim": ["confirmed attack", "account compromised"]
+  },
+  {
+    "name": "SYNTHETIC: Privilege escalation",
+    "alert": {
+      "@timestamp": "2026-11-01T09:10:00Z",
+      "rule": {
+        "id": "5402",
+        "level": 12,
+        "description": "Synthetic process attempted a privileged operation",
+        "mitre": { "id": ["T1068"], "tactic": ["Privilege Escalation"] }
+      },
+      "agent": { "id": "903" },
+      "data": { "action": "privileged operation", "protocol": "local" }
+    },
+    "expected_mitre": "T1068",
+    "must_mention": ["T1068", "privilege", "investigate"],
+    "must_not_claim": ["confirmed attack", "privileges escalated successfully"]
+  },
+  {
+    "name": "SYNTHETIC: File modification",
+    "alert": {
+      "@timestamp": "2026-11-01T09:15:00Z",
+      "rule": {
+        "id": "550",
+        "level": 7,
+        "description": "Synthetic integrity monitor detected a protected file change",
+        "mitre": { "id": ["T1565.001"], "tactic": ["Impact"] }
+      },
+      "agent": { "id": "904" },
+      "data": { "action": "modified", "protocol": "file integrity monitoring" }
+    },
+    "expected_mitre": "T1565.001",
+    "must_mention": ["T1565.001", "file", "modified"],
+    "must_not_claim": ["confirmed attack", "data was altered maliciously"]
+  },
+  {
+    "name": "SYNTHETIC: Malware detection",
+    "alert": {
+      "@timestamp": "2026-11-01T09:20:00Z",
+      "rule": {
+        "id": "87105",
+        "level": 12,
+        "description": "Synthetic malware signature detected during file execution",
+        "mitre": { "id": ["T1204.002"], "tactic": ["Execution"] }
+      },
+      "agent": { "id": "905" },
+      "data": { "action": "detected", "protocol": "endpoint scan" }
+    },
+    "expected_mitre": "T1204.002",
+    "must_mention": ["T1204.002", "malware", "detected"],
+    "must_not_claim": ["confirmed attack", "system fully compromised"]
+  },
+  {
+    "name": "SYNTHETIC: Suspicious PowerShell",
+    "alert": {
+      "@timestamp": "2026-11-01T09:25:00Z",
+      "rule": {
+        "id": "91820",
+        "level": 9,
+        "description": "Synthetic encoded PowerShell command observed",
+        "mitre": { "id": ["T1059.001"], "tactic": ["Execution"] }
+      },
+      "agent": { "id": "906" },
+      "data": { "action": "command observed", "protocol": "PowerShell" }
+    },
+    "expected_mitre": "T1059.001",
+    "must_mention": ["T1059.001", "PowerShell", "encoded"],
+    "must_not_claim": ["confirmed attack", "malware executed successfully"]
+  },
+  {
+    "name": "SYNTHETIC: Port scan",
+    "alert": {
+      "@timestamp": "2026-11-01T09:30:00Z",
+      "rule": {
+        "id": "40111",
+        "level": 8,
+        "description": "Synthetic source contacted several destination ports",
+        "mitre": { "id": ["T1046"], "tactic": ["Discovery"] }
+      },
+      "agent": { "id": "907" },
+      "data": {
+        "srcip": "192.0.2.73",
+        "dstport": "multiple",
+        "protocol": "tcp",
+        "action": "connection attempts"
+      }
+    },
+    "expected_mitre": "T1046",
+    "must_mention": ["T1046", "port", "scan"],
+    "must_not_claim": ["confirmed attack", "host compromised"]
+  },
+  {
+    "name": "SYNTHETIC: Suspicious connection",
+    "alert": {
+      "@timestamp": "2026-11-01T09:35:00Z",
+      "rule": {
+        "id": "100210",
+        "level": 7,
+        "description": "Synthetic outbound connection used a non-standard port",
+        "mitre": { "id": ["T1571"], "tactic": ["Command and Control"] }
+      },
+      "agent": { "id": "908" },
+      "data": {
+        "dstip": "203.0.113.77",
+        "dstport": "8448",
+        "protocol": "tcp",
+        "action": "outbound connection"
+      }
+    },
+    "expected_mitre": "T1571",
+    "must_mention": ["T1571", "connection", "non-standard port"],
+    "must_not_claim": ["confirmed attack", "command and control confirmed"]
+  },
+  {
+    "name": "SYNTHETIC: New user account",
+    "alert": {
+      "@timestamp": "2026-11-01T09:40:00Z",
+      "rule": {
+        "id": "5902",
+        "level": 8,
+        "description": "Synthetic local account creation event",
+        "mitre": { "id": ["T1136.001"], "tactic": ["Persistence"] }
+      },
+      "agent": { "id": "909" },
+      "data": { "action": "account created", "protocol": "local account" }
+    },
+    "expected_mitre": "T1136.001",
+    "must_mention": ["T1136.001", "new account", "creation"],
+    "must_not_claim": ["confirmed attack", "attacker account established"]
+  },
+  {
+    "name": "SYNTHETIC: Unusual authentication",
+    "alert": {
+      "@timestamp": "2026-11-01T09:45:00Z",
+      "rule": {
+        "id": "60106",
+        "level": 8,
+        "description": "Synthetic successful authentication from an unusual source",
+        "mitre": { "id": ["T1078"], "tactic": ["Initial Access"] }
+      },
+      "agent": { "id": "910" },
+      "data": {
+        "srcip": "198.51.100.91",
+        "authentication_result": "success",
+        "action": "authentication"
+      }
+    },
+    "expected_mitre": "T1078",
+    "must_mention": ["T1078", "successful authentication", "unusual"],
+    "must_not_claim": ["confirmed attack", "successful breach"]
+  }
+]
