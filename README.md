@@ -1,5 +1,7 @@
 # AI SOC Platform
 
+[![Backend tests](https://github.com/Albinthomas2005/AI-SOC-Platform/actions/workflows/backend-tests.yml/badge.svg?branch=main)](https://github.com/Albinthomas2005/AI-SOC-Platform/actions/workflows/backend-tests.yml)
+
 An educational security operations platform that combines a Python AI analysis service with a Wazuh 4.14.9 Dashboard plugin. The dashboard retrieves alert evidence as the signed-in Wazuh user and makes server-side requests to the local backend. The backend filters sensitive data before sending content to the configured AI provider.
 
 ## Repository layout
