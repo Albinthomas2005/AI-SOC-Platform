@@ -4,6 +4,7 @@ import {
   EuiCallOut,
   EuiFlexGroup,
   EuiFlexItem,
+  EuiMarkdownFormat,
   EuiPanel,
   EuiSpacer,
   EuiText,
@@ -100,9 +101,7 @@ export const AIAnalysisTab = ({ index, id }: AIAnalysisTabProps) => {
               <h3>Analysis</h3>
             </EuiTitle>
             <EuiSpacer size='s' />
-            <EuiText size='s'>
-              <pre style={{ whiteSpace: 'pre-wrap' }}>{analysis}</pre>
-            </EuiText>
+            <EuiMarkdownFormat>{analysis}</EuiMarkdownFormat>
           </EuiPanel>
         </EuiFlexItem>
       )}

@@ -6,6 +6,7 @@ import {
   EuiEmptyPrompt,
   EuiFlexGroup,
   EuiFlexItem,
+  EuiMarkdownFormat,
   EuiLoadingSpinner,
   EuiPage,
   EuiPageBody,
@@ -254,9 +255,7 @@ export const AiSocDashboard: React.FC = () => {
               </EuiCallOut>
               <EuiSpacer size='s' />
               <EuiPanel>
-                <EuiText>
-                  <pre style={{ whiteSpace: 'pre-wrap' }}>{report.text}</pre>
-                </EuiText>
+                <EuiMarkdownFormat>{report.text}</EuiMarkdownFormat>
               </EuiPanel>
             </>
           )}

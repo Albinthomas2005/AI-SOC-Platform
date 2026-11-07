@@ -61,14 +61,15 @@ describe('AiSocDashboard', () => {
       data: {
         ok: true,
         status: 'ai_generated_unverified',
-        report: 'Synthetic report draft',
+        report: '## Assessment\n\nSynthetic report draft',
       },
     });
     render(<AiSocDashboard />);
     fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
     expect(
-      await screen.findByText('Synthetic report draft'),
+      await screen.findByRole('heading', { level: 2, name: 'Assessment' }),
     ).toBeInTheDocument();
+    expect(screen.getByText('Synthetic report draft')).toBeInTheDocument();
     expect(
       screen.getByText('AI-generated report — unverified'),
     ).toBeInTheDocument();
