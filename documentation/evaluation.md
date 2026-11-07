@@ -1,21 +1,21 @@
 # Synthetic AI Analysis Evaluation
 
-Last run: 2026-11-07 06:46 UTC
+Last run: 2026-11-07 06:55 UTC
 
 These scenarios use synthetic, allowlisted Wazuh-style alerts. This report checks response text mechanically; it is not a clinical, security, or analyst-quality certification.
 
 | Scenario | API | MITRE | Keywords | Prohibited claims | Time (ms) | Overall |
 |---|---|---|---|---|---:|---|
-| SYNTHETIC: SSH brute force | PASS | PASS | PASS | PASS | 1554 | PASS |
-| SYNTHETIC: Multiple failed logins | PASS | FAIL | FAIL | PASS | 1925 | FAIL |
-| SYNTHETIC: Privilege escalation | PASS | FAIL | FAIL | PASS | 1439 | FAIL |
-| SYNTHETIC: File modification | PASS | PASS | PASS | PASS | 1060 | PASS |
-| SYNTHETIC: Malware detection | PASS | PASS | PASS | PASS | 1268 | PASS |
-| SYNTHETIC: Suspicious PowerShell | PASS | FAIL | FAIL | PASS | 1147 | FAIL |
-| SYNTHETIC: Port scan | PASS | PASS | PASS | PASS | 1479 | PASS |
-| SYNTHETIC: Suspicious connection | PASS | PASS | FAIL | PASS | 1610 | FAIL |
-| SYNTHETIC: New user account | PASS | PASS | FAIL | PASS | 1279 | FAIL |
-| SYNTHETIC: Unusual authentication | PASS | FAIL | FAIL | PASS | 6639 | FAIL |
+| SYNTHETIC: SSH brute force | PASS | PASS | PASS | PASS | 1251 | PASS |
+| SYNTHETIC: Multiple failed logins | PASS | PASS | PASS | PASS | 1464 | PASS |
+| SYNTHETIC: Privilege escalation | PASS | PASS | PASS | PASS | 1320 | PASS |
+| SYNTHETIC: File modification | PASS | PASS | PASS | PASS | 1566 | PASS |
+| SYNTHETIC: Malware detection | PASS | PASS | PASS | PASS | 1699 | PASS |
+| SYNTHETIC: Suspicious PowerShell | PASS | PASS | PASS | PASS | 1496 | PASS |
+| SYNTHETIC: Port scan | PASS | PASS | PASS | PASS | 1335 | PASS |
+| SYNTHETIC: Suspicious connection | PASS | PASS | PASS | PASS | 1150 | PASS |
+| SYNTHETIC: New user account | PASS | PASS | PASS | PASS | 8694 | PASS |
+| SYNTHETIC: Unusual authentication | PASS | PASS | PASS | PASS | 7421 | PASS |
 
 ## Limitations
 
