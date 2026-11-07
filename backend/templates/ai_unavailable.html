@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }} | SOC AI Assistant</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 30px;
+            font-family: Arial, sans-serif;
+            background: #0b1120;
+            color: #e5e7eb;
+        }
+        main {
+            max-width: 760px;
+            margin: 50px auto;
+            padding: 28px;
+            background: #142035;
+            border: 1px solid #334155;
+            border-radius: 12px;
+        }
+        h1 { color: #fbbf24; }
+        p { line-height: 1.7; }
+        a { color: #93c5fd; }
+        code { overflow-wrap: anywhere; }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>{{ title }}</h1>
+        <p>{{ message }}</p>
+
+        {% if alert_id %}
+        <p>Wazuh alert ID: <code>{{ alert_id }}</code></p>
+        {% endif %}
+
+        <p><a href="{{ url_for('dashboard', alert_id=alert_id) }}">Return to the SOC assistant</a></p>
+    </main>
+</body>
+</html>

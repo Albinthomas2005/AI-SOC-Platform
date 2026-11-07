@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SOC AI Assistant</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: #0b1120;
+            color: #e5e7eb;
+            font: 15px/1.5 Arial, sans-serif;
+        }
+        header {
+            padding: 22px 28px;
+            background: #111b2e;
+            border-bottom: 1px solid #334155;
+        }
+        header h1 { margin: 0; color: #60a5fa; }
+        header p { margin-bottom: 0; color: #94a3b8; }
+        main { max-width: 1500px; padding: 24px; margin: auto; }
+        .notice, .panel, .stat {
+            background: #142035;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            padding: 18px;
+        }
+        .notice { margin-bottom: 18px; color: #fbbf24; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .stat span { display: block; color: #94a3b8; }
+        .stat strong { display: block; font-size: 26px; margin-top: 6px; }
+        .high { color: #f87171; }
+        .medium { color: #fbbf24; }
+        .low { color: #4ade80; }
+        .panels {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 18px;
+            align-items: start;
+        }
+        .panel { min-width: 0; margin-bottom: 18px; }
+        h2 { margin-top: 0; font-size: 19px; }
+        h3 { font-size: 16px; color: #bfdbfe; }
+        label { display: block; margin: 12px 0 6px; color: #cbd5e1; }
+        select, textarea, input, button {
+            width: 100%;
+            border-radius: 7px;
+            border: 1px solid #475569;
+            padding: 11px;
+            font: inherit;
+        }
+        select, textarea, input {
+            background: #0b1120;
+            color: #e5e7eb;
+        }
+        textarea { resize: vertical; min-height: 130px; }
+        button {
+            margin-top: 12px;
+            background: #2563eb;
+            color: white;
+            border: 0;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        button:hover { background: #1d4ed8; }
+        .secondary { background: #334155; }
+        .status {
+            padding: 12px;
+            border: 1px solid #92400e;
+            background: #292014;
+            color: #fcd34d;
+            border-radius: 7px;
+        }
+        pre {
+            background: #080d18;
+            padding: 14px;
+            border: 1px solid #263449;
+            border-radius: 7px;
+            overflow: auto;
+            max-height: 540px;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            font-size: 12px;
+        }
+        .muted { color: #94a3b8; font-size: 13px; }
+        .table-wrap { overflow-x: auto; }
+        table { border-collapse: collapse; width: 100%; min-width: 650px; }
+        th, td {
+            text-align: left;
+            padding: 10px;
+            border-bottom: 1px solid #334155;
+        }
+        th { color: #93c5fd; }
+        a { color: #93c5fd; }
+        footer { padding: 22px; text-align: center; color: #94a3b8; }
+        @media (max-width: 850px) {
+            .panels { grid-template-columns: 1fr; }
+            .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            main { padding: 14px; }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>🛡️ SOC AI Assistant</h1>
+    <p>Wazuh detection · Alert investigation · Incident reporting</p>
+</header>
+
+<main>
+    <div class="notice">
+        AI status: {{ ai_status }}
+        <div class="muted">Wazuh detection remains independent of AI analysis.</div>
+    </div>
+
+    <section class="stats">
+        <div class="stat"><span>Total summary records</span><strong>{{ total }}</strong></div>
+        <div class="stat"><span>High severity</span><strong class="high">{{ high }}</strong></div>
+        <div class="stat"><span>Medium severity</span><strong class="medium">{{ medium }}</strong></div>
+        <div class="stat"><span>Low severity</span><strong class="low">{{ low }}</strong></div>
+    </section>
+
+    <section class="panels">
+        <div class="panel">
+            <h2>1. Original Wazuh alert</h2>
+            <p class="muted">Select an alert. The JSON below is read from raw-alert storage and is not edited by this page.</p>
+
+            <form method="get" action="/">
+                <label for="alert_id">Select Wazuh alert</label>
+                <select id="alert_id" name="alert_id" onchange="this.form.submit()">
+                    {% for item in raw_alerts %}
+                    <option value="{{ item.wazuh_id }}"
+                        {% if selected and item.wazuh_id == selected.wazuh_id %}selected{% endif %}>
+                        {{ item.timestamp }} — {{ item.wazuh_id }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <noscript><button type="submit">Load alert</button></noscript>
+            </form>
+
+            {% if selected and original_event %}
+                <p><strong>Alert ID:</strong> {{ selected.wazuh_id }}</p>
+                <p><strong>Rule:</strong> {{ original_event.get('rule', {}).get('description', 'Unknown') }}</p>
+                <p><strong>Rule level:</strong> {{ original_event.get('rule', {}).get('level', 'Unknown') }}</p>
+                <h3>Complete original JSON</h3>
+                <pre>{{ selected.raw_json }}</pre>
+
+                <form method="post" action="/explain">
+                    <input type="hidden" name="alert_id" value="{{ selected.wazuh_id }}">
+                    <button type="submit">Request AI explanation</button>
+                </form>
+            {% else %}
+                <p>No raw Wazuh alerts are available.</p>
+            {% endif %}
+        </div>
+
+        <div class="panel">
+            <h2>2. AI explanation</h2>
+            <div class="status">{{ ai_status }}</div>
+            <h3>What happened?</h3>
+            <p class="muted">Will be generated by a configured AI provider from the selected alert.</p>
+            <h3>Why it matters</h3>
+            <p class="muted">No AI assessment has been generated.</p>
+            <h3>Evidence</h3>
+            <p class="muted">Review the original event on the left. No evidence has been invented.</p>
+            <h3>Recommended investigation</h3>
+            <p class="muted">Connect an AI provider to receive alert-specific investigation recommendations.</p>
+        </div>
+    </section>
+
+    <section class="panel">
+        <h2>3. SOC incident report improver</h2>
+        <p class="muted">Enter rough analyst notes. Until AI is connected, this form will clearly report that rewriting is unavailable.</p>
+        <form method="post" action="/improve-report">
+            <label for="report_text">Your rough incident report</label>
+            <textarea id="report_text" name="report_text"
+                placeholder="Example: many ssh fail logs from lab host, need check if legit user..." required></textarea>
+            {% if selected %}
+            <input type="hidden" name="alert_id" value="{{ selected.wazuh_id }}">
+            {% endif %}
+            <button type="submit">Improve report with AI</button>
+        </form>
+        <p class="muted">Markdown export is available for report text you provide; it does not claim to be AI-improved.</p>
+        <form method="post" action="/export-report">
+            <label for="export_text">Export report as Markdown</label>
+            <textarea id="export_text" name="report_text"
+                placeholder="Paste or edit the report text you want to export." required></textarea>
+            <button class="secondary" type="submit">Download Markdown report</button>
+        </form>
+    </section>
+
+    <section class="panel">
+        <h2>Recent alert summaries</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th>Timestamp</th><th>Severity</th><th>Alert</th><th>Source IP</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                {% for alert in alerts %}
+                    <tr>
+                        <td>{{ alert.timestamp }}</td>
+                        <td class="{{ alert.severity|lower }}">{{ alert.severity }}</td>
+                        <td>{{ alert.rule }}</td>
+                        <td>{{ alert.source_ip or "Unknown" }}</td>
+                        <td>{{ alert.status }}</td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="5">No summary records found.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
+
+<footer>Local SOC AI Lab · Wazuh remains the detection and monitoring platform</footer>
+</body>
+</html>

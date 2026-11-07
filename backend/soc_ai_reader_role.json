@@ -1,0 +1,10 @@
+{
+  "cluster_permissions": [],
+  "index_permissions": [
+    {
+      "index_patterns": ["soc-ai-explanations"],
+      "allowed_actions": ["read"]
+    }
+  ],
+  "tenant_permissions": []
+}

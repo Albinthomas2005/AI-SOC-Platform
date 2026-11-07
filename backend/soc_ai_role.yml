@@ -1,0 +1,11 @@
+soc_ai_writer:
+  reserved: false
+  hidden: false
+  cluster_permissions: []
+  index_permissions:
+    - index_patterns:
+        - "soc-ai-explanations"
+      allowed_actions:
+        - "crud"
+        - "create_index"
+  tenant_permissions: []

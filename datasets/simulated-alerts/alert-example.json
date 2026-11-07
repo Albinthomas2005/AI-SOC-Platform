@@ -1,0 +1,19 @@
+{
+  "id": "SOC-AI-TEST-001",
+  "timestamp": "2026-10-22T10:00:00Z",
+  "rule": {
+    "id": "5710",
+    "level": 5,
+    "description": "Synthetic SSH authentication failure"
+  },
+  "agent": {
+    "id": "999",
+    "name": "soc-lab-test"
+  },
+  "data": {
+    "srcip": "192.0.2.10",
+    "dstuser": "testuser",
+    "authentication_result": "failure"
+  },
+  "full_log": "Synthetic test event: SSH authentication failed for testuser from documentation-only IP 192.0.2.10."
+}

@@ -1,0 +1,73 @@
+name: SOC AI Analysis Wazuh 4.x build
+
+on:
+  workflow_dispatch:
+    inputs:
+      reference:
+        description: "Branch, tag, or commit to build from this fork"
+        required: true
+        default: soc-ai-analysis-4x-ci
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout selected fork reference
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.reference }}
+          repository: ${{ github.repository }}
+
+      - name: Read platform version
+        id: platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./plugins/main/package.json').pluginPlatform.version")"
+          name="$(node -p "require('./plugins/main/package.json').name")"
+          plugin_version="$(node -p "require('./plugins/main/package.json').version")"
+          test "$version" = "2.19.6"
+          test "$name" = "wazuh"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "plugin_version=$plugin_version" >> "$GITHUB_OUTPUT"
+
+      - name: Build in official Wazuh OSD environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -e OPENSEARCH_DASHBOARDS_VERSION=${{ steps.platform.outputs.version }} \
+            -v "${{ github.workspace }}/plugins/main:/home/node/kbn/plugins/wazuh" \
+            quay.io/wazuh/osd-dev:${{ steps.platform.outputs.version }} \
+            bash -lc '
+              set -euo pipefail
+              cd /home/node/kbn/plugins/wazuh
+              yarn config set registry https://registry.yarnpkg.com
+              yarn install --non-interactive
+              yarn build
+              yarn lint
+              yarn test:jest
+            '
+
+      - name: Verify build output
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d plugins/main/build
+          find plugins/main/build -maxdepth 2 -type f -print
+          archive="$(find plugins/main/build -type f -name '*.zip' -print -quit)"
+          test -n "$archive"
+          unzip -t "$archive"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Upload plugin ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: wazuh-4.14.9-ai-analysis
+          path: ${{ steps.verify.outputs.archive }}
+          if-no-files-found: error
+          retention-days: 7
