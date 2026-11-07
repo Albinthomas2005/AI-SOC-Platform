@@ -51,6 +51,7 @@ jobs:
             quay.io/wazuh/osd-dev:2.19.6 \
             bash -lc '
               set -euo pipefail
+              git config --global --add safe.directory /home/node/kbn
               cd /home/node/kbn/plugins/wazuh
               yarn config set registry https://registry.yarnpkg.com
               yarn install --non-interactive
