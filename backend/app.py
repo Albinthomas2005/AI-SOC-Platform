@@ -21,6 +21,7 @@ from groq_service import (
     explain_alert,
     generate_investigation_report,
     GroqUnavailable,
+    InvalidAIResponse,
 )
 from privacy_filter import (
     minimize_report_evidence,
@@ -100,6 +101,11 @@ def analyze_alert_api():
             minimized_alert, privacy_context=privacy_context
         )
         analysis = explain_alert(safe_alert)
+    except InvalidAIResponse as error:
+        return jsonify(
+            ok=False,
+            error=f"AI response failed validation: {error}",
+        ), 502
     except GroqUnavailable:
         return jsonify(
             ok=False,
