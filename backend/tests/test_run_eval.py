@@ -1,8 +1,17 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 from unittest.mock import Mock
 
-from scripts.run_eval import evaluate_response, read_internal_token
+from scripts.run_eval import (
+    evaluate_response,
+    markdown_report,
+    read_internal_token,
+    run_scenario,
+    run_scenarios,
+)
 
 
 class TestEvaluationChecks(unittest.TestCase):
@@ -133,6 +142,86 @@ class TestEvaluationChecks(unittest.TestCase):
 
         self.assertEqual(token, "synthetic-token-value")
         self.assertEqual(output.getvalue(), "")
+
+    def test_mitre_from_input_is_reported_but_not_counted_in_overall(self):
+        scenario = {
+            "expected_mitre": "T1110",
+            "mitre_in_input": True,
+            "must_mention": ["SSH"],
+            "must_not_claim": ["confirmed attack"],
+        }
+        checks = evaluate_response(
+            self.response({"ok": True, "analysis": "SSH logins require review."}),
+            scenario,
+        )
+
+        self.assertFalse(checks["mitre"])
+        self.assertTrue(checks["overall"])
+        report = markdown_report(
+            [{"scenario": "SYNTHETIC: Existing mapping", "checks": checks,
+              "mitre_in_input": True, "duration_ms": 1}]
+        )
+        self.assertIn("yes (not independent)", report)
+        self.assertIn("excluded from the overall result", report)
+
+    def test_scenario_without_expected_mitre_has_no_mitre_check(self):
+        scenario = {
+            "expected_mitre": None,
+            "mitre_in_input": False,
+            "must_mention": ["routine"],
+            "must_not_claim": ["confirmed breach"],
+        }
+        checks = evaluate_response(
+            self.response({"ok": True, "analysis": "Routine event."}), scenario
+        )
+        self.assertIsNone(checks["mitre"])
+        self.assertTrue(checks["overall"])
+
+    def test_run_scenario_saves_response_body_without_request_credentials(self):
+        from scripts import run_eval
+
+        payload = json.dumps({"ok": True, "analysis": "T1110 SSH failed login."}).encode()
+        mocked_response = Mock()
+        mocked_response.status = 200
+        mocked_response.read.return_value = payload
+        mocked_response.__enter__ = Mock(return_value=mocked_response)
+        mocked_response.__exit__ = Mock(return_value=False)
+        scenario = {
+            "name": "SYNTHETIC: SSH check",
+            "alert": {"rule": {"mitre": {"id": ["T1110"]}}},
+            "expected_mitre": "T1110",
+            "mitre_in_input": True,
+            "must_mention": ["SSH"],
+            "must_not_claim": ["confirmed attack"],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "eval-responses"
+            with patch.object(run_eval.urllib.request, "urlopen", return_value=mocked_response) as urlopen:
+                result = run_scenario(scenario, "synthetic-token", 5000, output_dir)
+
+            saved = (output_dir / "synthetic-ssh-check.json").read_bytes()
+            request = urlopen.call_args.args[0]
+
+        self.assertTrue(result["checks"]["overall"])
+        self.assertEqual(saved, payload)
+        self.assertNotIn(b"synthetic-token", saved)
+        self.assertNotIn(b"synthetic-token", request.data)
+        self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-token")
+
+    def test_delay_is_applied_only_between_scenarios(self):
+        from scripts import run_eval
+
+        scenarios = [{"name": "one"}, {"name": "two"}, {"name": "three"}]
+        expected = [{"scenario": item["name"]} for item in scenarios]
+        with patch.object(run_eval, "run_scenario", side_effect=expected) as run, patch.object(
+            run_eval.time, "sleep"
+        ) as sleep:
+            results = run_scenarios(scenarios, "token", 5000, delay=0.25)
+
+        self.assertEqual(results, expected)
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        sleep.assert_called_with(0.25)
 
 
 if __name__ == "__main__":

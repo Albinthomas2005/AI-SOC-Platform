@@ -36,3 +36,6 @@ backups/
 .vscode/
 .idea/
 .DS_Store
+
+# Locally captured evaluation responses (may contain sensitive analysis text)
+eval-responses/
