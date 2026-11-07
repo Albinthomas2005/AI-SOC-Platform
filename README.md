@@ -32,6 +32,8 @@ cd backend
 python -m unittest discover -s tests -v
 ```
 
+GitHub Actions runs the backend suite from [`.github/workflows/backend-tests.yml`](.github/workflows/backend-tests.yml).
+
 Dashboard build and tests require a matching Wazuh 4.14.9 / OpenSearch Dashboards 2.19.6 development environment. See [installation](documentation/installation.md) for the expected commands and environment constraint.
 
 ## Dataset notice

@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from app import app
-from gemini_service import GeminiUnavailable, generate_investigation_report
+from groq_service import GroqUnavailable, generate_investigation_report
 
 
 INTERNAL_TOKEN = "unit-test-internal-token"
@@ -133,7 +133,7 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
     def test_provider_failure_returns_safe_json_error(self):
         with patch("app.sanitize_alert", side_effect=lambda alert: alert), patch(
             "app.explain_alert",
-            side_effect=GeminiUnavailable("private provider detail"),
+            side_effect=GroqUnavailable("private provider detail"),
         ):
             response = self.post_alert({"rule": {"id": "1001"}})
 
@@ -395,7 +395,7 @@ class TestGenerateReportAPI(unittest.TestCase):
 
     def test_every_provider_prompt_is_sanitized_before_transmission(self):
         from types import SimpleNamespace
-        from gemini_service import _generate
+        from groq_service import _generate
 
         completion = SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
@@ -406,7 +406,7 @@ class TestGenerateReportAPI(unittest.TestCase):
             )
         )
         with patch.dict(os.environ, {"GROQ_API_KEY": "synthetic-test-key"}), patch(
-            "gemini_service.Groq", return_value=client
+            "groq_service.Groq", return_value=client
         ):
             result = _generate(
                 "Private 192.168.3.4 and fd00::4; public 8.8.8.8; context 10.20.0.1",
@@ -430,7 +430,7 @@ class TestGenerateReportAPI(unittest.TestCase):
 
     def test_model_is_read_from_environment_at_call_time(self):
         from types import SimpleNamespace
-        from gemini_service import _generate
+        from groq_service import _generate
 
         completion = SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
@@ -442,14 +442,14 @@ class TestGenerateReportAPI(unittest.TestCase):
         with patch.dict(
             os.environ,
             {"GROQ_API_KEY": "synthetic-test-key", "GROQ_MODEL": "custom/model"},
-        ), patch("gemini_service.Groq", return_value=client):
+        ), patch("groq_service.Groq", return_value=client):
             _generate("test prompt")
 
         self.assertEqual(create.call_args.kwargs["model"], "custom/model")
 
     def test_reasoning_parameters_are_limited_to_gpt_oss_models(self):
         from types import SimpleNamespace
-        from gemini_service import _generate
+        from groq_service import _generate
 
         for model_name, should_include_reasoning in (
             ("openai/gpt-oss-20b", True),
@@ -473,7 +473,7 @@ class TestGenerateReportAPI(unittest.TestCase):
                         "GROQ_API_KEY": "synthetic-test-key",
                         "GROQ_MODEL": model_name,
                     },
-                ), patch("gemini_service.Groq", return_value=client):
+                ), patch("groq_service.Groq", return_value=client):
                     _generate("test prompt")
 
                 call_params = create.call_args.kwargs
@@ -489,7 +489,7 @@ class TestGenerateReportAPI(unittest.TestCase):
 
     def test_legacy_report_improvement_sanitizes_analyst_notes(self):
         from types import SimpleNamespace
-        from gemini_service import improve_report
+        from groq_service import improve_report
 
         completion = SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content="improved"))]
@@ -499,7 +499,7 @@ class TestGenerateReportAPI(unittest.TestCase):
             chat=SimpleNamespace(completions=SimpleNamespace(create=create))
         )
         with patch.dict(os.environ, {"GROQ_API_KEY": "synthetic-test-key"}), patch(
-            "gemini_service.Groq", return_value=client
+            "groq_service.Groq", return_value=client
         ):
             self.assertEqual(
                 improve_report("Investigated 172.16.4.20 and ::1"),
@@ -513,7 +513,7 @@ class TestGenerateReportAPI(unittest.TestCase):
 
     def test_strict_privacy_configuration_at_provider_boundary(self):
         from types import SimpleNamespace
-        from gemini_service import _generate
+        from groq_service import _generate
 
         cases = (
             ("true", True),
@@ -544,7 +544,7 @@ class TestGenerateReportAPI(unittest.TestCase):
                         os.environ.pop("SOC_AI_STRICT_PRIVACY", None)
                     else:
                         os.environ["SOC_AI_STRICT_PRIVACY"] = configured_value
-                    with patch("gemini_service.Groq", return_value=client):
+                    with patch("groq_service.Groq", return_value=client):
                         _generate(
                             "Host ws-23.corp.example user=alice; IP 192.168.4.8",
                             system_prompt=(
@@ -570,7 +570,7 @@ class TestGenerateReportAPI(unittest.TestCase):
     def test_provider_errors_return_safe_responses(self):
         with patch(
             "app.generate_investigation_report",
-            side_effect=GeminiUnavailable("private provider detail"),
+            side_effect=GroqUnavailable("private provider detail"),
         ):
             response = self.post_report()
 
@@ -597,7 +597,7 @@ The supplied record is insufficient.
 ## Recommended investigation steps
 Review related records.
 """
-        with patch("gemini_service._generate", return_value=provider_response) as generate:
+        with patch("groq_service._generate", return_value=provider_response) as generate:
             result = generate_investigation_report(
                 {"rule": {"id": "1001"}}, "synthetic notes"
             )
@@ -624,7 +624,7 @@ Insufficient evidence.
 ## Recommended investigation steps
 Check related records.
 """
-        with patch("gemini_service._generate", return_value=provider_response):
+        with patch("groq_service._generate", return_value=provider_response):
             report = generate_investigation_report(
                 {"rule": {"id": "1001"}}, "synthetic note"
             )
@@ -633,8 +633,8 @@ Check related records.
         self.assertIn("Not yet verified by an analyst.", report)
 
     def test_incomplete_provider_report_is_rejected(self):
-        with patch("gemini_service._generate", return_value="Incomplete draft"):
-            with self.assertRaises(GeminiUnavailable):
+        with patch("groq_service._generate", return_value="Incomplete draft"):
+            with self.assertRaises(GroqUnavailable):
                 generate_investigation_report({"rule": {"id": "1001"}})
 
 if __name__ == "__main__":

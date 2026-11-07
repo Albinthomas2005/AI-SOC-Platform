@@ -13,6 +13,7 @@ load_dotenv()
 from flask import (
     Flask,
     jsonify,
+    redirect,
     render_template,
     request,
     make_response,
@@ -20,15 +21,13 @@ from flask import (
 
 from database import (
     init_db,
-    get_alerts,
-    get_raw_alerts,
     get_raw_alert,
 )
-from gemini_service import (
+from groq_service import (
     explain_alert,
     generate_investigation_report,
     improve_report,
-    GeminiUnavailable,
+    GroqUnavailable,
 )
 from privacy_filter import (
     minimize_report_evidence,
@@ -98,56 +97,7 @@ def has_valid_internal_token():
 
 @app.route("/")
 def dashboard():
-    from flask import redirect
     return redirect("https://localhost/", code=302)
-
-    alerts = get_alerts()
-    raw_alerts = get_raw_alerts(limit=100)
-
-    selected_id = request.args.get("alert_id")
-    selected = get_raw_alert(selected_id) if selected_id else None
-
-    # Default to the newest raw event when no selection is provided.
-    if selected is None and raw_alerts:
-        selected = raw_alerts[0]
-
-    original_event = None
-
-    if selected:
-        try:
-            original_event = json.loads(selected["raw_json"])
-        except (TypeError, json.JSONDecodeError):
-            original_event = None
-
-    total = len(alerts)
-    high = sum(
-        1 for alert in alerts if alert["severity"] == "High"
-    )
-    medium = sum(
-        1 for alert in alerts if alert["severity"] == "Medium"
-    )
-    low = sum(
-        1 for alert in alerts if alert["severity"] == "Low"
-    )
-
-    ai_status, ai_ready = get_ai_status()
-
-    return render_template(
-        "dashboard.html",
-        alerts=alerts,
-        raw_alerts=raw_alerts,
-        selected=selected,
-        original_event=original_event,
-        ai_status=ai_status,
-        ai_ready=ai_ready,
-        total=total,
-        high=high,
-        medium=medium,
-        low=low,
-        explanation=None,
-        report_output=None,
-        report_input="",
-    )
 
 
 @app.route("/explain", methods=["POST"])
@@ -168,7 +118,7 @@ def explain_alert_route():
         safe_event = sanitize_alert(event)
         explanation = explain_alert(safe_event)
 
-    except GeminiUnavailable as exc:
+    except GroqUnavailable as exc:
         return render_template(
             "ai_unavailable.html",
             title="Groq analysis unavailable",
@@ -212,7 +162,7 @@ def analyze_alert_api():
     try:
         safe_alert = sanitize_alert(alert)
         analysis = explain_alert(safe_alert)
-    except GeminiUnavailable:
+    except GroqUnavailable:
         return jsonify(
             ok=False,
             error="AI analysis is temporarily unavailable",
@@ -292,7 +242,7 @@ def generate_report_api():
 
     try:
         report = generate_investigation_report(safe_alert, safe_notes)
-    except GeminiUnavailable:
+    except GroqUnavailable:
         return jsonify(
             ok=False,
             error="AI report generation is temporarily unavailable",
@@ -339,7 +289,7 @@ def improve_report_route():
             report_text=report_text,
         ), 400
 
-    except GeminiUnavailable as exc:
+    except GroqUnavailable as exc:
         return render_template(
             "ai_unavailable.html",
             title="Groq report improvement unavailable",

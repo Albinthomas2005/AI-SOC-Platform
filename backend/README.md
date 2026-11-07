@@ -166,7 +166,7 @@ sensitive details.
 
 ## Project status
 
-The repository includes the synthetic-alert integration, OpenSearch role examples, importer, and privacy-filter tests. Previous local testing reported eight privacy-filter tests passing and a synthetic explanation successfully stored in OpenSearch. The GitHub Actions run and a clean-machine setup still need to be checked. Automated processing of selected real alerts is not yet considered production-ready.
+The repository includes the synthetic-alert integration, OpenSearch role examples, importer, and 23 privacy-filter tests. The full backend test suite currently contains 53 tests. Automated processing of selected real alerts is not yet considered production-ready.
 
 ## Author
 
