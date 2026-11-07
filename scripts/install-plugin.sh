@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Download and install the Wazuh plugin on a local systemd based installation.
 # Optional environment overrides: DASHBOARD_HOME, DASHBOARD_SERVICE,
-# DASHBOARD_URL, DASHBOARD_HEALTH_URL.
+# DASHBOARD_URL, DASHBOARD_HEALTH_URL. MANUAL_INSTALL=1 explicitly enables
+# archive extraction only when no plugin installer executable is available.
 
 WORKFLOW=build-dashboard-plugin.yml
 ARTIFACT_NAME=wazuh-plugin-ai-soc
@@ -12,6 +13,7 @@ DASHBOARD_SERVICE="${DASHBOARD_SERVICE:-wazuh-dashboard}"
 DASHBOARD_URL="${DASHBOARD_URL:-https://localhost:5601}"
 DASHBOARD_HEALTH_URL="${DASHBOARD_HEALTH_URL:-${DASHBOARD_URL%/}/api/status}"
 DASHBOARD_OSD_VERSION="${DASHBOARD_OSD_VERSION:-}"
+MANUAL_INSTALL="${MANUAL_INSTALL:-0}"
 PLUGIN_ID=wazuh
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,18 +21,107 @@ DIST_ROOT="$REPO_ROOT/dist"
 PLUGIN_CLI="$DASHBOARD_HOME/bin/opensearch-dashboards-plugin"
 PLUGIN_ROOT="$DASHBOARD_HOME/plugins"
 PLUGIN_DIR="$PLUGIN_ROOT/$PLUGIN_ID"
+PLUGIN_BIN_DIR="$DASHBOARD_HOME/bin"
 DASHBOARD_PACKAGE="$DASHBOARD_HOME/package.json"
 INSTALL_LOG="$DIST_ROOT/install.log"
 RUN_ID="${1:-}"
 BACKUP_FILE=""
 SERVICE_WAS_ACTIVE=0
 SERVICE_STOPPED=0
+PLUGIN_OWNER=""
+PLUGIN_OWNER_UID=""
+PLUGIN_OWNER_GID=""
+INSTALLER_SOURCE=""
 
 run_privileged() {
   if (( EUID == 0 )); then
     "$@"
   else
     sudo "$@"
+  fi
+}
+
+run_plugin_installer() {
+  local action="$1"
+  shift
+  if [[ "$PLUGIN_OWNER" == "root" ]]; then
+    if (( EUID == 0 )); then
+      "$PLUGIN_CLI" "$action" --allow-root "$@"
+    else
+      sudo "$PLUGIN_CLI" "$action" --allow-root "$@"
+    fi
+  elif [[ "$(id -un)" == "$PLUGIN_OWNER" ]]; then
+    "$PLUGIN_CLI" "$action" "$@"
+  else
+    sudo -u "$PLUGIN_OWNER" -- "$PLUGIN_CLI" "$action" "$@"
+  fi
+}
+
+is_executable_path() {
+  local path="$1"
+  if [[ -x "$path" && ! -d "$path" ]]; then
+    return 0
+  fi
+  if command -v sudo >/dev/null 2>&1 && sudo test -x "$path" && sudo test ! -d "$path"; then
+    return 0
+  fi
+  return 1
+}
+
+find_plugin_installer() {
+  local candidate=""
+  local candidates_file="$ARTIFACT_DIR/plugin-binaries.txt"
+  local bin_contents
+
+  for candidate in \
+    "$PLUGIN_BIN_DIR/opensearch-dashboards-plugin" \
+    "$PLUGIN_BIN_DIR/wazuh-dashboard-plugin"; do
+    if is_executable_path "$candidate"; then
+      PLUGIN_CLI="$candidate"
+      INSTALLER_SOURCE="$candidate"
+      return 0
+    fi
+  done
+
+  find "$PLUGIN_BIN_DIR" -maxdepth 1 -name '*plugin*' -print 2>/dev/null > "$candidates_file" || true
+  if [[ ! -s "$candidates_file" ]] && command -v sudo >/dev/null 2>&1; then
+    sudo find "$PLUGIN_BIN_DIR" -maxdepth 1 -name '*plugin*' -print 2>/dev/null > "$candidates_file" || true
+  fi
+  while IFS= read -r candidate; do
+    if is_executable_path "$candidate"; then
+      PLUGIN_CLI="$candidate"
+      INSTALLER_SOURCE="$candidate"
+      return 0
+    fi
+  done < "$candidates_file"
+
+  candidate="$(command -v opensearch-dashboards-plugin 2>/dev/null || true)"
+  if [[ -n "$candidate" ]] && is_executable_path "$candidate"; then
+    PLUGIN_CLI="$candidate"
+    INSTALLER_SOURCE="PATH: $candidate"
+    return 0
+  fi
+
+  echo "No executable plugin installer was found. Contents of $PLUGIN_BIN_DIR:" >&2
+  if bin_contents="$(ls -la "$PLUGIN_BIN_DIR" 2>&1)"; then
+    printf '%s\n' "$bin_contents" >&2
+  elif command -v sudo >/dev/null 2>&1 && bin_contents="$(sudo ls -la "$PLUGIN_BIN_DIR" 2>&1)"; then
+    printf '%s\n' "$bin_contents" >&2
+  else
+    echo "  (directory is missing or could not be listed)" >&2
+  fi
+  return 1
+}
+
+read_owner_ids() {
+  local path="$1"
+  local ids
+  if ids="$(stat -c '%u:%g' "$path" 2>/dev/null)"; then
+    printf '%s' "$ids"
+  elif command -v sudo >/dev/null 2>&1 && ids="$(sudo stat -c '%u:%g' "$path" 2>/dev/null)"; then
+    printf '%s' "$ids"
+  else
+    return 1
   fi
 }
 
@@ -47,8 +138,8 @@ print_log_commands() {
 
 print_rollback_command() {
   if [[ -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]]; then
-    printf 'Rollback command (stop the service first):\n  sudo systemctl stop %q && sudo %q remove %q && sudo tar -xzf %q -C %q && sudo systemctl restart %q\n' \
-      "$DASHBOARD_SERVICE" "$PLUGIN_CLI" "$PLUGIN_ID" "$BACKUP_FILE" "$PLUGIN_ROOT" "$DASHBOARD_SERVICE"
+    printf 'Rollback command (stop the service first):\n  sudo systemctl stop %q && sudo rm -rf %q && sudo tar -xzf %q -C %q && sudo systemctl restart %q\n' \
+      "$DASHBOARD_SERVICE" "$PLUGIN_DIR" "$BACKUP_FILE" "$PLUGIN_ROOT" "$DASHBOARD_SERVICE"
   else
     echo "No prior plugin backup exists, so there is no previous plugin version to restore."
   fi
@@ -238,10 +329,19 @@ if [[ "$DASHBOARD_VERSION" != "$REPO_OSD_VERSION" ]]; then
   exit 1
 fi
 
-if [[ ! -x "$PLUGIN_CLI" ]]; then
-  echo "Plugin installer not found at $PLUGIN_CLI. Set DASHBOARD_HOME to the local Wazuh Dashboard installation." >&2
-  exit 1
+if find_plugin_installer; then
+  MANUAL_MODE=0
+  echo "Plugin installer found: $INSTALLER_SOURCE"
+else
+  if [[ "$MANUAL_INSTALL" == "1" ]]; then
+    MANUAL_MODE=1
+    echo "MANUAL_INSTALL=1: using the explicit manual extraction fallback."
+  else
+    echo "To use the documented manual extraction fallback, rerun with MANUAL_INSTALL=1." >&2
+    exit 1
+  fi
 fi
+
 if ! command -v systemctl >/dev/null 2>&1; then
   echo "systemctl is unavailable; this script expects the repository's documented host systemd installation." >&2
   exit 1
@@ -253,6 +353,31 @@ if (( EUID != 0 )); then
   fi
   echo "Using sudo because $DASHBOARD_HOME and the wazuh-dashboard systemd unit are system-managed."
 fi
+
+if [[ -d "$PLUGIN_DIR" ]]; then
+  OWNER_IDS="$(read_owner_ids "$PLUGIN_DIR")" || {
+    echo "Could not determine ownership of $PLUGIN_DIR." >&2
+    exit 1
+  }
+else
+  OWNER_IDS="$(read_owner_ids "$PLUGIN_ROOT")" || {
+    echo "Could not determine ownership of $PLUGIN_ROOT." >&2
+    exit 1
+  }
+fi
+PLUGIN_OWNER_UID="${OWNER_IDS%%:*}"
+PLUGIN_OWNER_GID="${OWNER_IDS##*:}"
+PLUGIN_OWNER_ENTRY="$(getent passwd "$PLUGIN_OWNER_UID" || true)"
+PLUGIN_OWNER="${PLUGIN_OWNER_ENTRY%%:*}"
+if [[ -z "$PLUGIN_OWNER" ]]; then
+  echo "Could not map plugin directory owner UID $PLUGIN_OWNER_UID to a user." >&2
+  exit 1
+fi
+if [[ "$PLUGIN_OWNER" != "root" && "$(id -un)" != "$PLUGIN_OWNER" ]] && ! command -v sudo >/dev/null 2>&1; then
+  echo "sudo is required to run the plugin installer as $PLUGIN_OWNER." >&2
+  exit 1
+fi
+echo "Plugin directory owner: $PLUGIN_OWNER (UID:GID $PLUGIN_OWNER_UID:$PLUGIN_OWNER_GID)"
 
 BACKUP_DIR="$DIST_ROOT/backups"
 BACKUP_FILE="$BACKUP_DIR/wazuh-plugin-${RUN_ID}.tar.gz"
@@ -276,29 +401,94 @@ if systemctl is-active --quiet "$DASHBOARD_SERVICE"; then
   SERVICE_STOPPED=1
 fi
 
-if [[ -e "$PLUGIN_DIR" || -L "$PLUGIN_DIR" ]]; then
-  if [[ ! -f "$BACKUP_FILE" ]]; then
-    echo "Refusing to remove $PLUGIN_DIR because no backup exists for run $RUN_ID." >&2
-    exit 1
-  fi
-  if run_privileged "$PLUGIN_CLI" remove "$PLUGIN_ID" >>"$INSTALL_LOG" 2>&1; then
+if (( MANUAL_MODE )); then
+  MANUAL_EXTRACT_DIR="$(mktemp -d "$ARTIFACT_DIR/manual-extract.XXXXXX")"
+  if unzip -q "$PLUGIN_ZIP" -d "$MANUAL_EXTRACT_DIR" >>"$INSTALL_LOG" 2>&1; then
     :
   else
     install_status=$?
     on_error "$install_status"
   fi
-fi
-PLUGIN_FILE_URI="$(python3 - "$PLUGIN_ZIP" <<'PY'
+  MANIFEST_RELATIVE="${MANIFEST_ENTRY%/*}"
+  if [[ "$MANIFEST_RELATIVE" == "$MANIFEST_ENTRY" ]]; then
+    MANUAL_SOURCE_DIR="$MANUAL_EXTRACT_DIR"
+  else
+    MANUAL_SOURCE_DIR="$MANUAL_EXTRACT_DIR/$MANIFEST_RELATIVE"
+  fi
+  if [[ ! -d "$MANUAL_SOURCE_DIR" || ! -f "$MANUAL_SOURCE_DIR/opensearch_dashboards.json" ]]; then
+    echo "Manual extraction did not produce a plugin folder containing opensearch_dashboards.json." >&2
+    exit 1
+  fi
+  MANUAL_MANIFEST_ID="$(python3 - "$MANUAL_SOURCE_DIR/opensearch_dashboards.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as manifest:
+    print(json.load(manifest).get("id", ""))
+PY
+)"
+  if [[ "$MANUAL_MANIFEST_ID" != "$PLUGIN_ID" ]]; then
+    echo "Manual extraction contains plugin '$MANUAL_MANIFEST_ID', expected '$PLUGIN_ID'; refusing to install." >&2
+    exit 1
+  fi
+
+  MANUAL_STAGE_DIR="$(run_privileged mktemp -d "$PLUGIN_ROOT/.${PLUGIN_ID}-install.XXXXXX")"
+  if run_privileged cp -a "$MANUAL_SOURCE_DIR/." "$MANUAL_STAGE_DIR/" >>"$INSTALL_LOG" 2>&1 && \
+    run_privileged chown -R "$PLUGIN_OWNER_UID:$PLUGIN_OWNER_GID" "$MANUAL_STAGE_DIR" >>"$INSTALL_LOG" 2>&1; then
+    :
+  else
+    install_status=$?
+    on_error "$install_status"
+  fi
+  if [[ -e "$PLUGIN_DIR" || -L "$PLUGIN_DIR" ]]; then
+    if [[ ! -f "$BACKUP_FILE" ]]; then
+      echo "Refusing to remove $PLUGIN_DIR because no backup exists for run $RUN_ID." >&2
+      exit 1
+    fi
+    if run_privileged rm -rf "$PLUGIN_DIR" >>"$INSTALL_LOG" 2>&1; then
+      :
+    else
+      install_status=$?
+      on_error "$install_status"
+    fi
+  fi
+  if run_privileged mv "$MANUAL_STAGE_DIR" "$PLUGIN_DIR" >>"$INSTALL_LOG" 2>&1; then
+    :
+  else
+    install_status=$?
+    on_error "$install_status"
+  fi
+  echo "Plugin installed manually at $PLUGIN_DIR with owner $PLUGIN_OWNER_UID:$PLUGIN_OWNER_GID."
+else
+  if [[ -e "$PLUGIN_DIR" || -L "$PLUGIN_DIR" ]]; then
+    if [[ ! -f "$BACKUP_FILE" ]]; then
+      echo "Refusing to remove $PLUGIN_DIR because no backup exists for run $RUN_ID." >&2
+      exit 1
+    fi
+    if run_plugin_installer remove "$PLUGIN_ID" >>"$INSTALL_LOG" 2>&1; then
+      :
+    else
+      install_status=$?
+      on_error "$install_status"
+    fi
+  fi
+  INSTALLER_ARCHIVE_DIR="$(mktemp -d /tmp/wazuh-plugin-archive.XXXXXX)"
+  INSTALLER_ARCHIVE="$INSTALLER_ARCHIVE_DIR/$(basename "$PLUGIN_ZIP")"
+  cp "$PLUGIN_ZIP" "$INSTALLER_ARCHIVE"
+  chmod 0755 "$INSTALLER_ARCHIVE_DIR"
+  chmod 0644 "$INSTALLER_ARCHIVE"
+  PLUGIN_FILE_URI="$(python3 - "$INSTALLER_ARCHIVE" <<'PY'
 from pathlib import Path
 import sys
 print(Path(sys.argv[1]).resolve().as_uri())
 PY
 )"
-if run_privileged "$PLUGIN_CLI" install --batch "$PLUGIN_FILE_URI" >>"$INSTALL_LOG" 2>&1; then
-  :
-else
-  install_status=$?
-  on_error "$install_status"
+  if run_plugin_installer install --batch "$PLUGIN_FILE_URI" >>"$INSTALL_LOG" 2>&1; then
+    :
+  else
+    install_status=$?
+    on_error "$install_status"
+  fi
+  rm -rf "$INSTALLER_ARCHIVE_DIR"
 fi
 run_privileged systemctl restart "$DASHBOARD_SERVICE"
 SERVICE_STOPPED=0
