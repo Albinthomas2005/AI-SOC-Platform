@@ -105,6 +105,13 @@ python -m unittest discover -s tests -v
 
 GitHub Actions runs the same unit-test command on pushes and pull requests to `main`.
 
+With the backend running and `SOC_AI_INTERNAL_TOKEN` set in the ignored
+`backend/.env`, run `./scripts/smoke_test.sh` from this directory. An optional
+port argument overrides the default `5000`. The script checks that a request
+without a token receives 401 and that the synthetic alert request returns
+`ok: true`; it prints only PASS/FAIL and status information, never the token or
+Groq key.
+
 ## Synthetic alert integration test
 
 After configuring the Groq API key, OpenSearch URL, TLS certificate, and least-privilege OpenSearch credentials for your local environment, run:
