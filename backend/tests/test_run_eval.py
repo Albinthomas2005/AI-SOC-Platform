@@ -73,6 +73,47 @@ class TestEvaluationChecks(unittest.TestCase):
             },
         )
 
+    def test_synonym_group_accepts_one_equivalent_phrase(self):
+        scenario = {
+            "expected_mitre": "T1571",
+            "must_mention": [
+                "T1571",
+                "connection",
+                ["non-standard port", "unusual port", "uncommon port"],
+            ],
+            "must_not_claim": ["confirmed attack"],
+        }
+        response = self.response(
+            {
+                "ok": True,
+                "analysis": "T1571: Review this suspicious connection on an unusual port.",
+            }
+        )
+
+        checks = evaluate_response(response, scenario)
+
+        self.assertTrue(checks["keywords"])
+        self.assertTrue(checks["overall"])
+
+    def test_synonym_group_still_fails_if_no_option_appears(self):
+        scenario = {
+            "expected_mitre": "T1571",
+            "must_mention": [
+                "T1571",
+                "connection",
+                ["non-standard port", "unusual port", "uncommon port"],
+            ],
+            "must_not_claim": ["confirmed attack"],
+        }
+        response = self.response(
+            {"ok": True, "analysis": "T1571: Review this suspicious connection."}
+        )
+
+        checks = evaluate_response(response, scenario)
+
+        self.assertFalse(checks["keywords"])
+        self.assertFalse(checks["overall"])
+
     def test_token_reader_returns_value_without_printing_it(self):
         from pathlib import Path
         from tempfile import TemporaryDirectory

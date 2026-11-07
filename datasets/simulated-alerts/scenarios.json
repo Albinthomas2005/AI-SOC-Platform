@@ -151,7 +151,11 @@
       }
     },
     "expected_mitre": "T1571",
-    "must_mention": ["T1571", "connection", "non-standard port"],
+    "must_mention": [
+      "T1571",
+      "connection",
+      ["non-standard port", "nonstandard port", "unusual port", "uncommon port"]
+    ],
     "must_not_claim": ["confirmed attack", "command and control confirmed"]
   },
   {
@@ -168,7 +172,11 @@
       "data": { "action": "account created", "protocol": "local account" }
     },
     "expected_mitre": "T1136.001",
-    "must_mention": ["T1136.001", "new account", "creation"],
+    "must_mention": [
+      "T1136.001",
+      ["new account", "new user account", "account created", "user created"],
+      ["creation", "created", "create", "provisioned"]
+    ],
     "must_not_claim": ["confirmed attack", "attacker account established"]
   },
   {

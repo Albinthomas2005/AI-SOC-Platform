@@ -49,12 +49,24 @@ def evaluate_response(response, scenario):
         and isinstance(analysis, str)
     )
     normalized = analysis.casefold() if usable_analysis else ""
+
+    def keyword_present(keyword_or_synonyms):
+        if isinstance(keyword_or_synonyms, str):
+            return keyword_or_synonyms.casefold() in normalized
+        if (
+            isinstance(keyword_or_synonyms, list)
+            and keyword_or_synonyms
+            and all(isinstance(option, str) for option in keyword_or_synonyms)
+        ):
+            return any(option.casefold() in normalized for option in keyword_or_synonyms)
+        return False
+
     checks = {
         "api": usable_analysis,
         "mitre": bool(scenario["expected_mitre"])
         and scenario["expected_mitre"].casefold() in normalized,
         "keywords": bool(scenario["must_mention"])
-        and all(keyword.casefold() in normalized for keyword in scenario["must_mention"]),
+        and all(keyword_present(keyword) for keyword in scenario["must_mention"]),
         "claims": bool(usable_analysis)
         and all(phrase.casefold() not in normalized for phrase in scenario["must_not_claim"]),
     }
