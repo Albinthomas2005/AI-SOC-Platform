@@ -40,15 +40,15 @@ Edit `.env` locally and set your own `GROQ_API_KEY`. Never commit the real `.env
 
 ## Internal AI analysis API
 
-The local Flask service provides `POST /api/ai/analyze-alert` for trusted
-services that need an AI explanation. It requires a bearer token in the
+The Flask service exposes only two application endpoints. `POST /api/ai/analyze-alert`
+accepts a Wazuh alert for trusted services that need an AI explanation. It requires a bearer token in the
 `SOC_AI_INTERNAL_TOKEN` environment variable, accepts a JSON object containing
 an `alert` object, sanitizes the alert before analysis, and returns JSON. The
 endpoint shares the app's 1 MiB request-size limit and is not intended for
 public exposure. The included Flask runner binds to `127.0.0.1`.
 
-The trusted Wazuh Dashboard server can also call
-`POST /api/ai/generate-report`. It requires the same bearer token and accepts a
+The trusted Wazuh Dashboard server can call `POST /api/ai/generate-report`.
+It requires the same bearer token and accepts a
 selected record reference, a minimized alert, and optional analyst context.
 The JSON request fields are `evidence.index`, `evidence.id`,
 `evidence.alert`, and optional `analyst_notes`, for example:
@@ -73,11 +73,8 @@ the request to Groq. Report drafts are labeled AI-generated and unverified,
 are not saved by this endpoint, and do not include related-log searches.
 Analyst-edited Markdown export is performed in the dashboard browser; keep the
 exported file in an approved case-management location if it must be retained.
-The legacy `/explain`, `/improve-report`, and `/export-report` form routes are
-not used by this dashboard workflow and do not have application-level
-authentication. Keep the backend loopback-only unless those routes are secured
-separately; the active service binding could not be verified from this
-development environment.
+There are no form-based analysis, report-improvement, or report-export routes.
+Both application endpoints require the internal bearer token.
 
 Generate a strong token locally with:
 
@@ -148,7 +145,7 @@ It can remove useful SOC evidence and does not classify or redact arbitrary
 command output or every identifier. The default remains off.
 
 The Generate Report API sends only allowlisted alert fields and sanitized notes.
-Alert analysis and the legacy report-improvement path also pass through the
+Both API endpoints pass their provider-bound prompts through the
 provider-boundary filter. Other prompt text, approved alert fields, timestamps,
 rule details, and other context may still be sent externally to Groq. Filtering
 reduces IP disclosure but does not provide complete anonymization. Pseudonyms

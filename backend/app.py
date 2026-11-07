@@ -13,20 +13,13 @@ load_dotenv()
 from flask import (
     Flask,
     jsonify,
-    redirect,
-    render_template,
     request,
-    make_response,
 )
 
-from database import (
-    init_db,
-    get_raw_alert,
-)
+from database import init_db
 from groq_service import (
     explain_alert,
     generate_investigation_report,
-    improve_report,
     GroqUnavailable,
 )
 from privacy_filter import (
@@ -60,25 +53,6 @@ def handle_request_too_large(error):
 init_db()
 
 
-def ai_is_configured():
-    """Check whether a Groq API key is configured."""
-    return bool(os.environ.get("GROQ_API_KEY"))
-
-
-def get_ai_status():
-    """Return the AI configuration status without exposing secrets."""
-    if ai_is_configured():
-        return (
-            "Groq API key detected; connection has not yet been tested.",
-            True,
-        )
-
-    return (
-        "AI unavailable — configure GROQ_API_KEY in .env.",
-        False,
-    )
-
-
 def has_valid_internal_token():
     expected_token = os.environ.get("SOC_AI_INTERNAL_TOKEN", "")
     authorization = request.headers.get("Authorization", "")
@@ -92,54 +66,6 @@ def has_valid_internal_token():
             supplied_token.encode("utf-8"),
             expected_token.encode("utf-8"),
         )
-    )
-
-
-@app.route("/")
-def dashboard():
-    return redirect("https://localhost/", code=302)
-
-
-@app.route("/explain", methods=["POST"])
-def explain_alert_route():
-    alert_id = request.form.get("alert_id", "").strip()
-    selected = get_raw_alert(alert_id) if alert_id else None
-
-    if not selected:
-        return render_template(
-            "ai_unavailable.html",
-            title="Alert not found",
-            message="The selected Wazuh alert could not be found.",
-            alert_id=alert_id,
-        ), 404
-
-    try:
-        event = json.loads(selected["raw_json"])
-        safe_event = sanitize_alert(event)
-        explanation = explain_alert(safe_event)
-
-    except GroqUnavailable as exc:
-        return render_template(
-            "ai_unavailable.html",
-            title="Groq analysis unavailable",
-            message=str(exc),
-            alert_id=alert_id,
-        ), 503
-
-    except (TypeError, json.JSONDecodeError):
-        return render_template(
-            "ai_unavailable.html",
-            title="Alert data error",
-            message="The stored alert JSON could not be parsed.",
-            alert_id=alert_id,
-        ), 500
-
-    return render_template(
-        "ai_result.html",
-        title="Groq alert explanation",
-        result=explanation,
-        alert_id=alert_id,
-        result_kind="explanation",
     )
 
 
@@ -259,70 +185,6 @@ def generate_report_api():
         evidence=safe_evidence,
         report=report,
     )
-
-
-@app.route("/improve-report", methods=["POST"])
-def improve_report_route():
-    report_text = request.form.get("report_text", "").strip()
-    alert_id = request.form.get("alert_id", "").strip()
-
-    if not report_text:
-        return render_template(
-            "ai_unavailable.html",
-            title="Report text required",
-            message=(
-                "Enter rough report notes before "
-                "requesting improvement."
-            ),
-            alert_id=alert_id,
-        ), 400
-
-    try:
-        improved = improve_report(report_text)
-
-    except ValueError as exc:
-        return render_template(
-            "ai_unavailable.html",
-            title="Report text required",
-            message=str(exc),
-            alert_id=alert_id,
-            report_text=report_text,
-        ), 400
-
-    except GroqUnavailable as exc:
-        return render_template(
-            "ai_unavailable.html",
-            title="Groq report improvement unavailable",
-            message=str(exc),
-            alert_id=alert_id,
-            report_text=report_text,
-        ), 503
-
-    return render_template(
-        "ai_result.html",
-        title="Improved incident report",
-        result=improved,
-        alert_id=alert_id,
-        result_kind="report",
-    )
-
-
-@app.route("/export-report", methods=["POST"])
-def export_report():
-    report_text = request.form.get("report_text", "").strip()
-
-    if not report_text:
-        return "No report text was provided.", 400
-
-    response = make_response(report_text + "\n")
-    response.headers["Content-Type"] = (
-        "text/markdown; charset=utf-8"
-    )
-    response.headers["Content-Disposition"] = (
-        'attachment; filename="soc-incident-report.md"'
-    )
-
-    return response
 
 
 if __name__ == "__main__":

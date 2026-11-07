@@ -2,7 +2,7 @@
 
 ## Backend
 
-Use Python 3.10 or newer. From `backend/`, create and activate a virtual environment, install `requirements.txt`, and copy `.env.example` to a local `.env`. Set provider credentials and a strong `SOC_AI_INTERNAL_TOKEN` in that ignored file. Keep the Flask service bound to `127.0.0.1` when using the current legacy routes.
+Use Python 3.10 or newer. From `backend/`, create and activate a virtual environment, install `requirements.txt`, and copy `.env.example` to a local `.env`. Set provider credentials and a strong `SOC_AI_INTERNAL_TOKEN` in that ignored file. The Flask service exposes only the token-protected `/api/ai/analyze-alert` and `/api/ai/generate-report` endpoints.
 
 Run backend tests from `backend/`:
 
