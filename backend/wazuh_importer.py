@@ -3,6 +3,7 @@ import json
 import os
 import sqlite3
 import stat
+from contextlib import closing
 from pathlib import Path
 
 from database import DB_PATH, init_db
@@ -38,7 +39,7 @@ def import_alerts():
     imported = 0
     skipped = 0
 
-    with sqlite3.connect(DB_PATH) as db:
+    with closing(sqlite3.connect(DB_PATH)) as db, db:
         # Add a separate tracking table; preserve the original alerts table.
         db.execute("""
             CREATE TABLE IF NOT EXISTS wazuh_imports (

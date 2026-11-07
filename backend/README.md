@@ -51,6 +51,12 @@ an `alert` object, sanitizes the alert before analysis, and returns JSON. The
 endpoint shares the app's 1 MiB request-size limit and is not intended for
 public exposure. The included Flask runner binds to `127.0.0.1`.
 
+The development runner reads optional `SOC_AI_HOST` and `SOC_AI_PORT` settings
+from `.env`, defaulting to `127.0.0.1` and `5000`. It accepts `127.0.0.1`,
+`localhost`, and `::1` by default. Binding another host is refused unless
+`SOC_AI_ALLOW_NON_LOOPBACK=true` is explicitly configured; exposing the service
+outside loopback requires separate network controls.
+
 The trusted Wazuh Dashboard server can call `POST /api/ai/generate-report`.
 It requires the same bearer token and accepts a
 selected record reference, a minimized alert, and optional analyst context.
@@ -98,6 +104,13 @@ python -m unittest discover -s tests -v
 ```
 
 GitHub Actions runs the same unit-test command on pushes and pull requests to `main`.
+
+With the backend running and `SOC_AI_INTERNAL_TOKEN` set in the ignored
+`backend/.env`, run `./scripts/smoke_test.sh` from this directory. An optional
+port argument overrides the default `5000`. The script checks that a request
+without a token receives 401 and that the synthetic alert request returns
+`ok: true`; it prints only PASS/FAIL and status information, never the token or
+Groq key.
 
 ## Synthetic alert integration test
 

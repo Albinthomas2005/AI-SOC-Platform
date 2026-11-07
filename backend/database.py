@@ -1,5 +1,6 @@
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "soc_alerts.db"
@@ -13,7 +14,7 @@ def get_connection():
 
 def init_db():
     """Create required tables without deleting existing data."""
-    with get_connection() as connection:
+    with closing(get_connection()) as connection, connection:
         # Existing dashboard summary table.
         connection.execute("""
             CREATE TABLE IF NOT EXISTS alerts (
@@ -44,7 +45,7 @@ def init_db():
 
 
 def add_alert(timestamp, severity, rule, source_ip, status="New"):
-    with get_connection() as connection:
+    with closing(get_connection()) as connection, connection:
         connection.execute("""
             INSERT INTO alerts
                 (timestamp, severity, rule, source_ip, status)
@@ -53,7 +54,7 @@ def add_alert(timestamp, severity, rule, source_ip, status="New"):
 
 
 def get_alerts():
-    with get_connection() as connection:
+    with closing(get_connection()) as connection, connection:
         return connection.execute("""
             SELECT * FROM alerts ORDER BY id DESC
         """).fetchall()
@@ -61,7 +62,7 @@ def get_alerts():
 
 def get_raw_alerts(limit=100):
     """Return recent raw Wazuh alerts."""
-    with get_connection() as connection:
+    with closing(get_connection()) as connection, connection:
         return connection.execute("""
             SELECT wazuh_id, timestamp, raw_json
             FROM wazuh_raw_alerts
@@ -72,7 +73,7 @@ def get_raw_alerts(limit=100):
 
 def get_raw_alert(wazuh_id):
     """Retrieve one original Wazuh alert by ID."""
-    with get_connection() as connection:
+    with closing(get_connection()) as connection, connection:
         return connection.execute("""
             SELECT wazuh_id, timestamp, raw_json
             FROM wazuh_raw_alerts

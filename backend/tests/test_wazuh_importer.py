@@ -4,6 +4,7 @@ import sqlite3
 import stat
 import tempfile
 import unittest
+from contextlib import closing
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -55,7 +56,7 @@ class TestImportAlertsInputPath(unittest.TestCase):
             ), redirect_stdout(output):
                 importer.import_alerts()
 
-            with sqlite3.connect(database_path) as db:
+            with closing(sqlite3.connect(database_path)) as db, db:
                 imported = db.execute(
                     "SELECT timestamp, severity, rule, source_ip FROM alerts"
                 ).fetchone()

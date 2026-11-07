@@ -199,9 +199,26 @@ def generate_report_api():
     )
 
 
+def run_app():
+    host = os.environ.get("SOC_AI_HOST", "127.0.0.1")
+    port_value = os.environ.get("SOC_AI_PORT", "5000")
+    allow_non_loopback = os.environ.get("SOC_AI_ALLOW_NON_LOOPBACK") == "true"
+
+    if host not in {"127.0.0.1", "localhost", "::1"} and not allow_non_loopback:
+        raise SystemExit(
+            "SOC_AI_HOST must be loopback unless "
+            "SOC_AI_ALLOW_NON_LOOPBACK=true is set."
+        )
+
+    try:
+        port = int(port_value)
+    except ValueError:
+        raise SystemExit("SOC_AI_PORT must be an integer.") from None
+    if not 1 <= port <= 65535:
+        raise SystemExit("SOC_AI_PORT must be between 1 and 65535.")
+
+    app.run(host=host, port=port, debug=False)
+
+
 if __name__ == "__main__":
-    app.run(
-        host="127.0.0.1",
-        port=5000,
-        debug=False,
-    )
+    run_app()
