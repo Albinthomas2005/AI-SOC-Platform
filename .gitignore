@@ -43,3 +43,7 @@ backups/
 
 # Locally captured evaluation responses (may contain sensitive analysis text)
 eval-responses/
+
+# Downloaded build artifacts, install backups and copied CI logs
+dist/
+failed-log.txt
