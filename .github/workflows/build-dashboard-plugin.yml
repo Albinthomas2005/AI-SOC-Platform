@@ -1,0 +1,75 @@
+name: Build Wazuh AI SOC plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_checks:
+        description: Run plugin lint and Jest tests after the build
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the selected ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Verify Wazuh and OpenSearch Dashboards versions
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./wazuh-dashboard/plugins/main/package.json').pluginPlatform.version")"
+          name="$(node -p "require('./wazuh-dashboard/plugins/main/package.json').name")"
+          test "$version" = "2.19.6"
+          test "$name" = "wazuh"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build plugin in the official Wazuh OSD environment
+        shell: bash
+        env:
+          RUN_CHECKS: ${{ inputs.run_checks }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -e OPENSEARCH_DASHBOARDS_VERSION=${{ steps.versions.outputs.version }} \
+            -e RUN_CHECKS="$RUN_CHECKS" \
+            -v "${GITHUB_WORKSPACE}/wazuh-dashboard/plugins/main:/home/node/kbn/plugins/wazuh" \
+            quay.io/wazuh/osd-dev:2.19.6 \
+            bash -lc '
+              set -euo pipefail
+              cd /home/node/kbn/plugins/wazuh
+              yarn config set registry https://registry.yarnpkg.com
+              yarn install --non-interactive
+              yarn build
+              if [[ "$RUN_CHECKS" == "true" ]]; then
+                yarn lint
+                yarn test:jest
+              fi
+            '
+
+      - name: Verify plugin archive
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d wazuh-dashboard/plugins/main/build
+          archive="$(find wazuh-dashboard/plugins/main/build -type f -name '*.zip' -print -quit)"
+          test -n "$archive"
+          unzip -t "$archive"
+          echo "path=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Upload plugin archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: wazuh-plugin-ai-soc
+          path: ${{ steps.archive.outputs.path }}
+          if-no-files-found: error
+          retention-days: 7
