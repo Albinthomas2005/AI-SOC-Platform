@@ -1,5 +1,7 @@
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from app import app
@@ -26,6 +28,16 @@ What is not known: Whether this activity affected another system.
 
 class TestAnalyzeAlertAPI(unittest.TestCase):
     def setUp(self):
+        import database
+
+        self.db_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.db_temp.cleanup)
+        self.db_patch = patch.object(
+            database, "DB_PATH", Path(self.db_temp.name) / "soc_alerts.db"
+        )
+        self.db_patch.start()
+        self.addCleanup(self.db_patch.stop)
+        database.init_db()
         self.env_patch = patch.dict(
             os.environ,
             {"SOC_AI_INTERNAL_TOKEN": INTERNAL_TOKEN},
@@ -89,6 +101,51 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
         self.assertIn("AI response failed validation", response.get_json()["error"])
         self.assertIn("confidence level", response.get_json()["error"])
 
+    def test_analyst_approval_is_stored_with_timestamp(self):
+        import database
+
+        with patch("app.explain_alert", return_value="Synthetic draft"):
+            generated = self.post_alert({"rule": {"id": "1001"}}).get_json()
+        response = self.client.post(
+            f"/api/ai/analysis/{generated['analysis_id']}/decision",
+            json={"decision": "approved", "note": "Reviewed synthetic evidence."},
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        decision = response.get_json()
+        self.assertEqual(decision["decision"], "approved")
+        self.assertTrue(decision["decided_at"])
+        stored = database.get_ai_analysis(generated["analysis_id"])
+        self.assertEqual(stored["decision"], "approved")
+        self.assertEqual(stored["decision_note"], "Reviewed synthetic evidence.")
+        self.assertEqual(stored["analysis_text"], "Synthetic draft")
+
+    def test_edited_decision_requires_and_stores_revised_text(self):
+        import database
+
+        with patch("app.explain_alert", return_value="Synthetic draft"):
+            generated = self.post_alert({"rule": {"id": "1001"}}).get_json()
+        response = self.client.post(
+            f"/api/ai/analysis/{generated['analysis_id']}/decision",
+            json={"decision": "edited", "edited_analysis": "Analyst revised draft"},
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            database.get_ai_analysis(generated["analysis_id"])["edited_text"],
+            "Analyst revised draft",
+        )
+
+    def test_invalid_analyst_decision_is_rejected(self):
+        response = self.client.post(
+            "/api/ai/analysis/00000000000000000000000000000000/decision",
+            json={"decision": "maybe"},
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_explanation_flags_mitre_id_missing_from_local_catalog(self):
         import json
         import tempfile
@@ -143,10 +200,11 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
             response = self.post_alert(original)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.get_json(),
-            {"ok": True, "analysis": "Analysis text"},
-        )
+        payload = response.get_json()
+        self.assertEqual(payload["analysis"], "Analysis text")
+        self.assertEqual(payload["decision"], "unreviewed")
+        self.assertEqual(payload["decision_label"], "AI draft - not reviewed")
+        self.assertRegex(payload["analysis_id"], r"^[0-9a-f]{32}$")
         self.assertEqual(
             explain.call_args.args[0],
             {"rule": {"id": "1001", "description": "Synthetic test"}},
@@ -310,6 +368,16 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
 
 class TestGenerateReportAPI(unittest.TestCase):
     def setUp(self):
+        import database
+
+        self.db_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.db_temp.cleanup)
+        self.db_patch = patch.object(
+            database, "DB_PATH", Path(self.db_temp.name) / "soc_alerts.db"
+        )
+        self.db_patch.start()
+        self.addCleanup(self.db_patch.stop)
+        database.init_db()
         self.env_patch = patch.dict(
             os.environ,
             {"SOC_AI_INTERNAL_TOKEN": INTERNAL_TOKEN},
@@ -435,9 +503,14 @@ class TestGenerateReportAPI(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         result = response.get_json()
-        self.assertEqual(set(result), {"ok", "status", "evidence", "report"})
+        self.assertTrue(
+            {"ok", "analysis_id", "status", "evidence", "report", "decision", "decision_label"}
+            .issubset(result)
+        )
         self.assertIs(result["ok"], True)
         self.assertEqual(result["status"], "ai_generated_unverified")
+        self.assertEqual(result["decision_label"], "AI draft - not reviewed")
+        self.assertTrue(result["report"].startswith("AI draft - not reviewed"))
         self.assertEqual(
             result["evidence"],
             {
@@ -735,7 +808,8 @@ Review related records.
                 {"rule": {"id": "1001"}}, "synthetic notes"
             )
 
-        self.assertTrue(result.startswith("AI-GENERATED DRAFT — UNVERIFIED"))
+        self.assertTrue(result.startswith("AI draft - not reviewed"))
+        self.assertIn("AI-GENERATED DRAFT — UNVERIFIED", result)
         prompt = generate.call_args.args[0]
         system_prompt = generate.call_args.kwargs["system_prompt"]
         for heading in (

@@ -3,6 +3,8 @@ import hmac
 import json
 import os
 import re
+import uuid
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
@@ -16,7 +18,7 @@ from flask import (
     request,
 )
 
-from database import init_db
+from database import init_db, save_ai_analysis, set_ai_analysis_decision
 from groq_service import (
     explain_alert,
     generate_investigation_report,
@@ -101,6 +103,14 @@ def analyze_alert_api():
             minimized_alert, privacy_context=privacy_context
         )
         analysis = explain_alert(safe_alert)
+        analysis_id = uuid.uuid4().hex
+        created_at = datetime.now(timezone.utc).isoformat()
+        save_ai_analysis(
+            analysis_id,
+            created_at,
+            json.dumps(safe_alert, ensure_ascii=False),
+            analysis,
+        )
     except InvalidAIResponse as error:
         return jsonify(
             ok=False,
@@ -117,7 +127,14 @@ def analyze_alert_api():
             error="AI analysis could not be completed",
         ), 500
 
-    return jsonify(ok=True, analysis=analysis)
+    return jsonify(
+        ok=True,
+        analysis_id=analysis_id,
+        analysis=analysis,
+        decision="unreviewed",
+        decision_label="AI draft - not reviewed",
+        decided_at=None,
+    )
 
 
 @app.route("/api/ai/generate-report", methods=["POST"])
@@ -186,6 +203,16 @@ def generate_report_api():
 
     try:
         report = generate_investigation_report(safe_alert, safe_notes)
+        if not report.startswith("AI draft - not reviewed"):
+            report = "AI draft - not reviewed\n\n" + report
+        analysis_id = uuid.uuid4().hex
+        created_at = datetime.now(timezone.utc).isoformat()
+        save_ai_analysis(
+            analysis_id,
+            created_at,
+            json.dumps(safe_alert, ensure_ascii=False),
+            report,
+        )
     except GroqUnavailable:
         return jsonify(
             ok=False,
@@ -199,9 +226,69 @@ def generate_report_api():
 
     return jsonify(
         ok=True,
+        analysis_id=analysis_id,
         status="ai_generated_unverified",
         evidence=safe_evidence,
         report=report,
+        decision="unreviewed",
+        decision_label="AI draft - not reviewed",
+        decided_at=None,
+    )
+
+
+@app.route("/api/ai/analysis/<analysis_id>/decision", methods=["POST"])
+def record_analysis_decision(analysis_id):
+    if not has_valid_internal_token():
+        return jsonify(ok=False, error="Authentication required"), 401
+
+    if not re.fullmatch(r"[0-9a-f]{32}", analysis_id):
+        return jsonify(ok=False, error="Invalid analysis ID"), 400
+    if not request.is_json:
+        return jsonify(ok=False, error="A JSON analyst decision is required"), 400
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) - {
+        "decision", "note", "edited_analysis"
+    }:
+        return jsonify(ok=False, error="Invalid analyst decision"), 400
+    decision = payload.get("decision")
+    note = payload.get("note", "")
+    edited_analysis = payload.get("edited_analysis")
+    if (
+        decision not in {"approved", "edited", "rejected"}
+        or not isinstance(note, str)
+        or len(note) > MAX_ANALYST_NOTES_CHARS
+        or (decision == "edited" and (
+            not isinstance(edited_analysis, str)
+            or not edited_analysis.strip()
+            or len(edited_analysis) > 65536
+        ))
+        or (decision != "edited" and edited_analysis is not None)
+    ):
+        return jsonify(ok=False, error="Invalid analyst decision"), 400
+
+    decided_at = datetime.now(timezone.utc).isoformat()
+    try:
+        updated = set_ai_analysis_decision(
+            analysis_id,
+            decision,
+            note.strip() or None,
+            decided_at,
+            edited_analysis.strip() if decision == "edited" else None,
+        )
+    except Exception:
+        return jsonify(ok=False, error="Analyst decision could not be saved"), 500
+    if not updated:
+        return jsonify(ok=False, error="Analysis was not found"), 404
+
+    return jsonify(
+        ok=True,
+        analysis_id=analysis_id,
+        decision=decision,
+        decision_label=f"Analyst {decision}",
+        note=note.strip() or None,
+        decided_at=decided_at,
+        edited_analysis=edited_analysis.strip() if decision == "edited" else None,
     )
 
 

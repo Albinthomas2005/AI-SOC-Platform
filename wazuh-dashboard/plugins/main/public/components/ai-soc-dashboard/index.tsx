@@ -14,6 +14,7 @@ import {
   EuiPanel,
   EuiSpacer,
   EuiStat,
+  EuiTextArea,
   EuiText,
   EuiTitle,
 } from '@elastic/eui';
@@ -34,12 +35,26 @@ function displayTimestamp(timestamp?: string): string {
 }
 
 const severityLabels = ['critical', 'high', 'medium', 'low'] as const;
+type AnalystDecision = 'unreviewed' | 'approved' | 'edited' | 'rejected';
+type ReportState = {
+  id: string;
+  analysisId: string;
+  text: string;
+  decision: AnalystDecision;
+  decisionNote?: string;
+  decidedAt?: string;
+};
 
 export const AiSocDashboard: React.FC = () => {
   const result = useAiSocOverview();
-  const [report, setReport] = useState<{ id: string; text: string }>();
+  const [report, setReport] = useState<ReportState>();
   const [reportError, setReportError] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
+  const [decisionLoading, setDecisionLoading] = useState(false);
+  const [decisionError, setDecisionError] = useState(false);
+  const [editingReport, setEditingReport] = useState(false);
+  const [editedText, setEditedText] = useState('');
+  const [decisionNote, setDecisionNote] = useState('');
   const requestInFlight = useRef(false);
   const data = result.status === 'available' ? result.data : undefined;
   const failure =
@@ -64,17 +79,77 @@ export const AiSocDashboard: React.FC = () => {
       if (
         payload?.ok !== true ||
         payload.status !== 'ai_generated_unverified' ||
+        typeof payload.analysis_id !== 'string' ||
+        !/^[0-9a-f]{32}$/.test(payload.analysis_id) ||
+        payload.decision !== 'unreviewed' ||
+        payload.decision_label !== 'AI draft - not reviewed' ||
         typeof payload.report !== 'string' ||
         !payload.report.trim()
       ) {
         throw new Error('Invalid report response');
       }
-      setReport({ id: alert.id, text: payload.report });
+      setReport({
+        id: alert.id,
+        analysisId: payload.analysis_id,
+        text: payload.report,
+        decision: 'unreviewed',
+      });
+      setEditedText(payload.report);
+      setDecisionNote('');
+      setEditingReport(false);
     } catch {
       setReportError(true);
     } finally {
       requestInFlight.current = false;
       setReportLoading(false);
+    }
+  };
+
+  const recordDecision = async (decision: 'approved' | 'edited' | 'rejected') => {
+    if (!report || decisionLoading) return;
+    setDecisionLoading(true);
+    setDecisionError(false);
+    try {
+      const body: Record<string, string> = {
+        analysis_id: report.analysisId,
+        decision,
+        note: decisionNote,
+      };
+      if (decision === 'edited') body.edited_analysis = editedText;
+      const response = await WzRequest.genericReq(
+        'POST',
+        '/api/ai/analysis/decision',
+        body,
+        { shouldRetry: false, checkCurrentApiIsUp: false },
+      );
+      const payload = response?.data;
+      if (
+        payload?.ok !== true ||
+        payload.analysis_id !== report.analysisId ||
+        payload.decision !== decision ||
+        typeof payload.decided_at !== 'string'
+      ) {
+        throw new Error('Invalid analyst decision response');
+      }
+      setReport(current =>
+        current
+          ? {
+              ...current,
+              text:
+                decision === 'edited' && typeof payload.edited_analysis === 'string'
+                  ? payload.edited_analysis
+                  : current.text,
+              decision,
+              decisionNote: payload.note,
+              decidedAt: payload.decided_at,
+            }
+          : current,
+      );
+      setEditingReport(false);
+    } catch {
+      setDecisionError(true);
+    } finally {
+      setDecisionLoading(false);
     }
   };
 
@@ -245,17 +320,101 @@ export const AiSocDashboard: React.FC = () => {
             <>
               <EuiSpacer size='m' />
               <EuiCallOut
-                color='warning'
+                color={report.decision === 'unreviewed' ? 'warning' : 'success'}
                 iconType='alert'
-                title='AI-generated report — unverified'
+                title={
+                  report.decision === 'unreviewed'
+                    ? 'AI draft - not reviewed'
+                    : `Analyst decision: ${report.decision}`
+                }
               >
                 <p>
-                  Review this draft against the alert evidence before using it.
+                  AI-generated output is unverified. Review it against the alert
+                  evidence before using it.
                 </p>
+                {report.decisionNote && <p>Analyst note: {report.decisionNote}</p>}
+                {report.decidedAt && <p>Decision time: {displayTimestamp(report.decidedAt)}</p>}
               </EuiCallOut>
               <EuiSpacer size='s' />
               <EuiPanel>
-                <EuiMarkdownFormat>{report.text}</EuiMarkdownFormat>
+                {editingReport ? (
+                  <EuiTextArea
+                    aria-label='Edit AI report'
+                    fullWidth
+                    rows={12}
+                    value={editedText}
+                    onChange={event => setEditedText(event.target.value)}
+                  />
+                ) : (
+                  <EuiMarkdownFormat>{report.text}</EuiMarkdownFormat>
+                )}
+                <EuiSpacer size='s' />
+                <EuiTextArea
+                  aria-label='Analyst decision note'
+                  placeholder='Optional analyst note'
+                  fullWidth
+                  rows={2}
+                  value={decisionNote}
+                  onChange={event => setDecisionNote(event.target.value)}
+                />
+                <EuiSpacer size='s' />
+                <EuiFlexGroup gutterSize='s' responsive={false}>
+                  {editingReport ? (
+                    <>
+                      <EuiFlexItem grow={false}>
+                        <EuiButton
+                          isLoading={decisionLoading}
+                          isDisabled={decisionLoading || !editedText.trim()}
+                          onClick={() => void recordDecision('edited')}
+                        >
+                          Save edited report
+                        </EuiButton>
+                      </EuiFlexItem>
+                      <EuiFlexItem grow={false}>
+                        <EuiButton onClick={() => setEditingReport(false)}>Cancel</EuiButton>
+                      </EuiFlexItem>
+                    </>
+                  ) : (
+                    <>
+                      <EuiFlexItem grow={false}>
+                        <EuiButton
+                          isLoading={decisionLoading}
+                          isDisabled={decisionLoading}
+                          onClick={() => void recordDecision('approved')}
+                        >
+                          Approve
+                        </EuiButton>
+                      </EuiFlexItem>
+                      <EuiFlexItem grow={false}>
+                        <EuiButton
+                          isDisabled={decisionLoading}
+                          onClick={() => {
+                            setEditedText(report.text);
+                            setEditingReport(true);
+                          }}
+                        >
+                          Edit
+                        </EuiButton>
+                      </EuiFlexItem>
+                      <EuiFlexItem grow={false}>
+                        <EuiButton
+                          isLoading={decisionLoading}
+                          isDisabled={decisionLoading}
+                          onClick={() => void recordDecision('rejected')}
+                        >
+                          Reject
+                        </EuiButton>
+                      </EuiFlexItem>
+                    </>
+                  )}
+                </EuiFlexGroup>
+                {decisionError && (
+                  <EuiCallOut
+                    color='danger'
+                    iconType='alert'
+                    title='The analyst decision could not be saved.'
+                  />
+                )}
               </EuiPanel>
             </>
           )}
