@@ -1,5 +1,5 @@
-import { DashboardPanelState } from 'src/plugins/dashboard/public/application';
-import { EmbeddableInput } from 'src/plugins/embeddable/public';
+import { DashboardPanelState } from '../../../../../../../../src/plugins/dashboard/public/application';
+import { EmbeddableInput } from '../../../../../../../../src/plugins/embeddable/public';
 
 const getVisStateSeverityCritical = (indexPatternId: string) => {
   return {
