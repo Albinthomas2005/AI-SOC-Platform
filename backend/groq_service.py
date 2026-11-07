@@ -85,6 +85,12 @@ Use simple English with these headings:
 3. Evidence from this alert
 4. Recommended investigation steps
 5. Confidence and limitations
+6. MITRE ATT&CK (hypothesis)
+
+For section 6, provide a MITRE ATT&CK technique id and name only when the
+supplied alert fields support that mapping. Otherwise write exactly:
+"Not determinable from this alert". Treat a supported mapping as a hypothesis,
+not proof of attacker intent.
 
 Separate observed facts from hypotheses. Do not claim that an attack
 occurred unless the evidence supports that conclusion. Never invent
