@@ -5,25 +5,22 @@ import os
 import re
 
 from dotenv import load_dotenv
+
+# Load environment variables before importing the AI service so it sees the
+# configured model and credentials.
+load_dotenv()
+
 from flask import (
     Flask,
     jsonify,
-    render_template,
     request,
-    make_response,
 )
 
-from database import (
-    init_db,
-    get_alerts,
-    get_raw_alerts,
-    get_raw_alert,
-)
-from gemini_service import (
+from database import init_db
+from groq_service import (
     explain_alert,
     generate_investigation_report,
-    improve_report,
-    GeminiUnavailable,
+    GroqUnavailable,
 )
 from privacy_filter import (
     minimize_report_evidence,
@@ -31,9 +28,6 @@ from privacy_filter import (
     sanitize_alert,
     sanitize_text,
 )
-
-# Load environment variables from the local .env file.
-load_dotenv()
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
@@ -59,25 +53,6 @@ def handle_request_too_large(error):
 init_db()
 
 
-def ai_is_configured():
-    """Check whether a Groq API key is configured."""
-    return bool(os.environ.get("GROQ_API_KEY"))
-
-
-def get_ai_status():
-    """Return the AI configuration status without exposing secrets."""
-    if ai_is_configured():
-        return (
-            "Groq API key detected; connection has not yet been tested.",
-            True,
-        )
-
-    return (
-        "AI unavailable — configure GROQ_API_KEY in .env.",
-        False,
-    )
-
-
 def has_valid_internal_token():
     expected_token = os.environ.get("SOC_AI_INTERNAL_TOKEN", "")
     authorization = request.headers.get("Authorization", "")
@@ -91,103 +66,6 @@ def has_valid_internal_token():
             supplied_token.encode("utf-8"),
             expected_token.encode("utf-8"),
         )
-    )
-
-
-@app.route("/")
-def dashboard():
-    from flask import redirect
-    return redirect("https://localhost/", code=302)
-
-    alerts = get_alerts()
-    raw_alerts = get_raw_alerts(limit=100)
-
-    selected_id = request.args.get("alert_id")
-    selected = get_raw_alert(selected_id) if selected_id else None
-
-    # Default to the newest raw event when no selection is provided.
-    if selected is None and raw_alerts:
-        selected = raw_alerts[0]
-
-    original_event = None
-
-    if selected:
-        try:
-            original_event = json.loads(selected["raw_json"])
-        except (TypeError, json.JSONDecodeError):
-            original_event = None
-
-    total = len(alerts)
-    high = sum(
-        1 for alert in alerts if alert["severity"] == "High"
-    )
-    medium = sum(
-        1 for alert in alerts if alert["severity"] == "Medium"
-    )
-    low = sum(
-        1 for alert in alerts if alert["severity"] == "Low"
-    )
-
-    ai_status, ai_ready = get_ai_status()
-
-    return render_template(
-        "dashboard.html",
-        alerts=alerts,
-        raw_alerts=raw_alerts,
-        selected=selected,
-        original_event=original_event,
-        ai_status=ai_status,
-        ai_ready=ai_ready,
-        total=total,
-        high=high,
-        medium=medium,
-        low=low,
-        explanation=None,
-        report_output=None,
-        report_input="",
-    )
-
-
-@app.route("/explain", methods=["POST"])
-def explain_alert_route():
-    alert_id = request.form.get("alert_id", "").strip()
-    selected = get_raw_alert(alert_id) if alert_id else None
-
-    if not selected:
-        return render_template(
-            "ai_unavailable.html",
-            title="Alert not found",
-            message="The selected Wazuh alert could not be found.",
-            alert_id=alert_id,
-        ), 404
-
-    try:
-        event = json.loads(selected["raw_json"])
-        safe_event = sanitize_alert(event)
-        explanation = explain_alert(safe_event)
-
-    except GeminiUnavailable as exc:
-        return render_template(
-            "ai_unavailable.html",
-            title="Groq analysis unavailable",
-            message=str(exc),
-            alert_id=alert_id,
-        ), 503
-
-    except (TypeError, json.JSONDecodeError):
-        return render_template(
-            "ai_unavailable.html",
-            title="Alert data error",
-            message="The stored alert JSON could not be parsed.",
-            alert_id=alert_id,
-        ), 500
-
-    return render_template(
-        "ai_result.html",
-        title="Groq alert explanation",
-        result=explanation,
-        alert_id=alert_id,
-        result_kind="explanation",
     )
 
 
@@ -207,10 +85,22 @@ def analyze_alert_api():
     if not isinstance(alert, dict) or not alert:
         return jsonify(ok=False, error="A valid alert object is required"), 400
 
+    privacy_context = new_privacy_context()
+    minimized_alert = minimize_report_evidence(
+        alert, privacy_context=privacy_context
+    )
+    if not minimized_alert:
+        return jsonify(
+            ok=False,
+            error="Alert has no analyzable fields",
+        ), 422
+
     try:
-        safe_alert = sanitize_alert(alert)
+        safe_alert = sanitize_alert(
+            minimized_alert, privacy_context=privacy_context
+        )
         analysis = explain_alert(safe_alert)
-    except GeminiUnavailable:
+    except GroqUnavailable:
         return jsonify(
             ok=False,
             error="AI analysis is temporarily unavailable",
@@ -290,7 +180,7 @@ def generate_report_api():
 
     try:
         report = generate_investigation_report(safe_alert, safe_notes)
-    except GeminiUnavailable:
+    except GroqUnavailable:
         return jsonify(
             ok=False,
             error="AI report generation is temporarily unavailable",
@@ -307,70 +197,6 @@ def generate_report_api():
         evidence=safe_evidence,
         report=report,
     )
-
-
-@app.route("/improve-report", methods=["POST"])
-def improve_report_route():
-    report_text = request.form.get("report_text", "").strip()
-    alert_id = request.form.get("alert_id", "").strip()
-
-    if not report_text:
-        return render_template(
-            "ai_unavailable.html",
-            title="Report text required",
-            message=(
-                "Enter rough report notes before "
-                "requesting improvement."
-            ),
-            alert_id=alert_id,
-        ), 400
-
-    try:
-        improved = improve_report(report_text)
-
-    except ValueError as exc:
-        return render_template(
-            "ai_unavailable.html",
-            title="Report text required",
-            message=str(exc),
-            alert_id=alert_id,
-            report_text=report_text,
-        ), 400
-
-    except GeminiUnavailable as exc:
-        return render_template(
-            "ai_unavailable.html",
-            title="Groq report improvement unavailable",
-            message=str(exc),
-            alert_id=alert_id,
-            report_text=report_text,
-        ), 503
-
-    return render_template(
-        "ai_result.html",
-        title="Improved incident report",
-        result=improved,
-        alert_id=alert_id,
-        result_kind="report",
-    )
-
-
-@app.route("/export-report", methods=["POST"])
-def export_report():
-    report_text = request.form.get("report_text", "").strip()
-
-    if not report_text:
-        return "No report text was provided.", 400
-
-    response = make_response(report_text + "\n")
-    response.headers["Content-Type"] = (
-        "text/markdown; charset=utf-8"
-    )
-    response.headers["Content-Disposition"] = (
-        'attachment; filename="soc-incident-report.md"'
-    )
-
-    return response
 
 
 if __name__ == "__main__":

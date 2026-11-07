@@ -1,12 +1,11 @@
 
 import json
+import os
 import sqlite3
+import stat
 from pathlib import Path
 
 from database import DB_PATH, init_db
-
-WAZUH_ALERTS = Path("/tmp/wazuh_alerts.json")
-
 
 def severity_name(level):
     if level >= 12:
@@ -17,9 +16,22 @@ def severity_name(level):
 
 
 def import_alerts():
-    if not WAZUH_ALERTS.exists():
-        raise FileNotFoundError(
-            f"Wazuh alerts file not found: {WAZUH_ALERTS}"
+    configured_path = os.environ.get("WAZUH_ALERTS_FILE")
+    if not configured_path:
+        raise SystemExit(
+            "WAZUH_ALERTS_FILE must be set to the Wazuh alerts JSONL file path."
+        )
+
+    alerts_file = Path(configured_path).expanduser()
+    try:
+        file_mode = alerts_file.stat().st_mode
+    except OSError as error:
+        raise SystemExit(
+            f"Cannot access Wazuh alerts file from WAZUH_ALERTS_FILE: {error}"
+        ) from None
+    if file_mode & stat.S_IWOTH:
+        raise SystemExit(
+            "Refusing Wazuh alerts file because it is world-writable."
         )
 
     init_db()
@@ -34,7 +46,7 @@ def import_alerts():
             )
         """)
 
-        with WAZUH_ALERTS.open("r", encoding="utf-8") as source:
+        with alerts_file.open("r", encoding="utf-8") as source:
             for line in source:
                 try:
                     event = json.loads(line)

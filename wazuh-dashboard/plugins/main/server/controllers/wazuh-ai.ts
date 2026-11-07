@@ -48,7 +48,7 @@ const AI_SERVICE_URL = 'http://127.0.0.1:5000/api/ai/analyze-alert';
 const AI_REPORT_SERVICE_URL = 'http://127.0.0.1:5000/api/ai/generate-report';
 const MAX_AI_REPORT_NOTES_CHARS = 4000;
 const MAX_AI_ALERT_BYTES = 256 * 1024;
-const AI_SERVICE_TIMEOUT_MS = 5000;
+const AI_SERVICE_TIMEOUT_MS = 45000;
 const ALLOWED_ALERT_FIELDS = [
   '@timestamp',
   'timestamp',

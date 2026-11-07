@@ -32,8 +32,16 @@ cd backend
 python -m unittest discover -s tests -v
 ```
 
+GitHub Actions runs the backend suite from [`.github/workflows/backend-tests.yml`](.github/workflows/backend-tests.yml).
+
 Dashboard build and tests require a matching Wazuh 4.14.9 / OpenSearch Dashboards 2.19.6 development environment. See [installation](documentation/installation.md) for the expected commands and environment constraint.
 
 ## Dataset notice
 
 Files under `datasets/simulated-alerts/` are synthetic examples for development and tests. They are not production telemetry and must not be represented as real incidents.
+
+## License and attribution
+
+`wazuh-dashboard/` is a fork of Wazuh Dashboard, Copyright Wazuh, Inc., distributed under GPL-2.0. The root [`LICENSE`](LICENSE) is copied from that project. The `backend/` code is also released under GPL-2.0 unless the repository owner chooses a different license.
+
+<!-- TODO: Repository owner: confirm whether GPL-2.0 should also apply to backend/. -->
