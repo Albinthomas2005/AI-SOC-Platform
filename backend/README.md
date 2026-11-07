@@ -51,6 +51,12 @@ an `alert` object, sanitizes the alert before analysis, and returns JSON. The
 endpoint shares the app's 1 MiB request-size limit and is not intended for
 public exposure. The included Flask runner binds to `127.0.0.1`.
 
+The development runner reads optional `SOC_AI_HOST` and `SOC_AI_PORT` settings
+from `.env`, defaulting to `127.0.0.1` and `5000`. It accepts `127.0.0.1`,
+`localhost`, and `::1` by default. Binding another host is refused unless
+`SOC_AI_ALLOW_NON_LOOPBACK=true` is explicitly configured; exposing the service
+outside loopback requires separate network controls.
+
 The trusted Wazuh Dashboard server can call `POST /api/ai/generate-report`.
 It requires the same bearer token and accepts a
 selected record reference, a minimized alert, and optional analyst context.
