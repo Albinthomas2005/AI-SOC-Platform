@@ -41,35 +41,40 @@ def save_explanation(alert, explanation):
         "status": "analyzed"
     }
 
-    import subprocess
-
-    result = subprocess.run(
-        [
-            "curl", "--silent", "--show-error", "--fail-with-body",
-            "--cacert", CA_FILE,
-            "--user", "soc_ai_service:" + password,
-            "-H", "Content-Type: application/json",
-            "-X", "POST", INDEX_URL,
-            "--data-binary", "@-"
-        ],
-        input=json.dumps(document),
-        text=True,
-        capture_output=True,
-        timeout=30
+    authorization = base64.b64encode(
+        f"soc_ai_service:{password}".encode("utf-8")
+    ).decode("ascii")
+    request = urllib.request.Request(
+        INDEX_URL,
+        data=json.dumps(document).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Basic {authorization}",
+        },
+        method="POST",
     )
-
-    if result.returncode != 0:
+    ssl_context = ssl.create_default_context(cafile=CA_FILE)
+    try:
+        with urllib.request.urlopen(
+            request, context=ssl_context, timeout=30
+        ) as response:
+            response_text = response.read().decode("utf-8")
+    except urllib.error.URLError as error:
         print("Indexer save failed.")
-        if result.stdout:
-            print(result.stdout)
-        if result.stderr:
-            print(result.stderr)
-        raise SystemExit(result.returncode)
+        if isinstance(error, urllib.error.HTTPError):
+            error_text = error.read().decode("utf-8", errors="replace")
+            if error_text:
+                print(error_text)
+            if error.reason:
+                print(error.reason)
+        elif error.reason:
+            print(error.reason)
+        raise SystemExit(1) from None
 
-    response = json.loads(result.stdout)
-    print("Saved AI explanation to:", response.get("_index"))
-    print("Document ID:", response.get("_id"))
-    print("Result:", response.get("result"))
+    response_data = json.loads(response_text)
+    print("Saved AI explanation to:", response_data.get("_index"))
+    print("Document ID:", response_data.get("_id"))
+    print("Result:", response_data.get("result"))
 
 
 def main():
