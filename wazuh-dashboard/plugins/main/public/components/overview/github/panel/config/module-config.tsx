@@ -18,8 +18,8 @@ import {
   DrilldownConfigOrganization,
   DrilldownConfigRepository,
 } from './';
-import { tUseSearchBarProps } from '../../../common/search-bar/use-search-bar';
-import { IndexPattern } from '../../../../../../src/plugins/data/public';
+import { tUseSearchBarProps } from '../../../../common/search-bar/use-search-bar';
+import { IndexPattern } from 'src/plugins/data/public';
 
 export const ModuleConfig = {
   main: {

@@ -28,7 +28,7 @@
  * under the License.
  */
 
-import { FatalErrorsSetup } from '../../../../../core/public';
+import { FatalErrorsSetup } from 'src/core/public';
 import {
   AngularHttpError,
   formatAngularHttpError,

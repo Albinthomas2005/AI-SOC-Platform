@@ -28,7 +28,7 @@
  * under the License.
  */
 
-import { TopNavMenuItem } from '../../../../console/public/application/components';
+import { TopNavMenuItem } from 'src/plugins/console/public/application/components';
 import { topNavItems } from './top-nav-items';
 
 interface Props {

@@ -1,5 +1,5 @@
 import { EuiStepStatus } from '@elastic/eui';
-import { UseFormReturn } from '../../../components/common/form/types';
+import { UseFormReturn } from '../../../common/form/types';
 import {
   FormStepsDependencies,
   RegisterAgentFormStatusManager,

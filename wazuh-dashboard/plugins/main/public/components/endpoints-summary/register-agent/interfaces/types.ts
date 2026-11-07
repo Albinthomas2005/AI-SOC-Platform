@@ -1,4 +1,4 @@
-import { tOperatingSystem } from '../config/os-commands-definitions';
+import { tOperatingSystem } from '../core/config/os-commands-definitions';
 
 interface RegisterAgentData {
   icon: string;

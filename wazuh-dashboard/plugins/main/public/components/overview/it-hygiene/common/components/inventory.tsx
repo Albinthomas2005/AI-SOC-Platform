@@ -9,7 +9,7 @@ import { useDataSourceWithSearchBar } from '../../../../common/hooks/use-data-so
 import { IntlProvider } from 'react-intl';
 import { CustomSearchBar } from '../../../../common/custom-search-bar';
 import { getPlugins } from '../../../../../kibana-services';
-import { ViewMode } from '../../../../../../../../src/plugins/embeddable/public';
+import { ViewMode } from 'src/plugins/embeddable/public';
 import {
   TabsManagedBySearchParam,
   TabsManagedBySearchParamProps,

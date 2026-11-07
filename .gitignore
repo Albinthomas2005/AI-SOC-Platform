@@ -5,6 +5,10 @@
 *.pem
 *.key
 *password*
+# Exact source-code exceptions; other password/credential files remain ignored.
+!wazuh-dashboard/plugins/main/public/components/common/form/input-password.tsx
+!wazuh-dashboard/plugins/main/public/components/endpoints-summary/register-agent/services/wazuh-password-service.ts
+!wazuh-dashboard/plugins/main/public/components/endpoints-summary/register-agent/services/wazuh-password-service.test.ts
 *secret*
 *credential*
 

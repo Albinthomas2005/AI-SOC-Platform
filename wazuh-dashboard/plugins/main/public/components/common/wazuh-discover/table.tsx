@@ -36,7 +36,7 @@ import {
 
 import { LoadingSearchbarProgress } from '../loading-searchbar-progress/loading-searchbar-progress';
 // common components/hooks
-import { IndexPattern } from '../../../../../../../src/plugins/data/public';
+import { IndexPattern } from 'src/plugins/data/public';
 import { wzDiscoverRenderColumns } from './render-columns';
 import {
   DocumentViewTableAndJson,

@@ -12,10 +12,10 @@
  */
 
 import React from 'react';
-import { ViewMode } from '../../../../../../../../src/plugins/embeddable/public';
+import { ViewMode } from 'src/plugins/embeddable/public';
 import { getPlugins } from '../../../../../kibana-services';
-import { DashboardPanelState } from '../../../../../../../../src/plugins/dashboard/public/application';
-import { EmbeddableInput } from '../../../../../../../../src/plugins/embeddable/public';
+import { DashboardPanelState } from 'src/plugins/dashboard/public/application';
+import { EmbeddableInput } from 'src/plugins/embeddable/public';
 import {
   getVisStateOfficeTopOperations,
   getVisStateTopOfficeUsers,

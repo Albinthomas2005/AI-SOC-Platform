@@ -1,7 +1,7 @@
 import {
   EnhancedFieldConfiguration,
   UseFormReturn,
-} from '../../../components/common/form/types';
+} from '../../../common/form/types';
 import {
   FormStepsDependencies,
   RegisterAgentFormStatusManager,

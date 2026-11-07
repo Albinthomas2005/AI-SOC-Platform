@@ -1,4 +1,4 @@
-import { UseFormReturn } from '../../../components/common/form/types';
+import { UseFormReturn } from '../../../common/form/types';
 
 type FieldStatus = 'invalid' | 'empty' | 'complete';
 type FormStatus = {

@@ -1,5 +1,5 @@
-import { DashboardPanelState } from '../../../../../../../../src/plugins/dashboard/public/application';
-import { EmbeddableInput } from '../../../../../../../../src/plugins/embeddable/public';
+import { DashboardPanelState } from 'src/plugins/dashboard/public/application';
+import { EmbeddableInput } from 'src/plugins/embeddable/public';
 import { tParsedIndexPattern } from '../../../common/data-source';
 
 /* WARNING: The panel id must be unique including general and agents visualizations. Otherwise, the visualizations will not refresh when we pin an agent, because they are cached by id */
