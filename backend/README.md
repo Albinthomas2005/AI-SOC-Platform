@@ -38,6 +38,10 @@ cp .env.example .env
 
 Edit `.env` locally and set your own `GROQ_API_KEY`. Never commit the real `.env` file. OpenSearch connection settings and credentials must be configured locally according to your deployment and the integration script.
 
+The optional alert importer reads newline-delimited Wazuh JSON from the path in
+`WAZUH_ALERTS_FILE`. Set it in the ignored local `.env` file to an authorized
+alerts file. The importer refuses files with the world-writable permission bit.
+
 ## Internal AI analysis API
 
 The Flask service exposes only two application endpoints. `POST /api/ai/analyze-alert`
