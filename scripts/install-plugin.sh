@@ -32,6 +32,7 @@ PLUGIN_OWNER=""
 PLUGIN_OWNER_UID=""
 PLUGIN_OWNER_GID=""
 INSTALLER_SOURCE=""
+INSTALLER_ARCHIVE_DIR=""
 
 run_privileged() {
   if (( EUID == 0 )); then
@@ -41,21 +42,30 @@ run_privileged() {
   fi
 }
 
+run_as_plugin_owner() {
+  if [[ "$(id -un)" == "$PLUGIN_OWNER" ]]; then
+    "$@"
+  else
+    sudo -u "$PLUGIN_OWNER" -- "$@"
+  fi
+}
+
 run_plugin_installer() {
   local action="$1"
   shift
   if [[ "$PLUGIN_OWNER" == "root" ]]; then
-    if (( EUID == 0 )); then
-      "$PLUGIN_CLI" "$action" --allow-root "$@"
-    else
-      sudo "$PLUGIN_CLI" "$action" --allow-root "$@"
-    fi
-  elif [[ "$(id -un)" == "$PLUGIN_OWNER" ]]; then
-    "$PLUGIN_CLI" "$action" "$@"
+    run_as_plugin_owner "$PLUGIN_CLI" "$action" --allow-root "$@"
   else
-    sudo -u "$PLUGIN_OWNER" -- "$PLUGIN_CLI" "$action" "$@"
+    run_as_plugin_owner "$PLUGIN_CLI" "$action" "$@"
   fi
 }
+
+cleanup_temp() {
+  if [[ -n "$INSTALLER_ARCHIVE_DIR" && -d "$INSTALLER_ARCHIVE_DIR" ]]; then
+    rm -rf -- "$INSTALLER_ARCHIVE_DIR"
+  fi
+}
+trap cleanup_temp EXIT
 
 is_executable_path() {
   local path="$1"
@@ -83,9 +93,10 @@ find_plugin_installer() {
     fi
   done
 
-  find "$PLUGIN_BIN_DIR" -maxdepth 1 -name '*plugin*' -print 2>/dev/null > "$candidates_file" || true
-  if [[ ! -s "$candidates_file" ]] && command -v sudo >/dev/null 2>&1; then
-    sudo find "$PLUGIN_BIN_DIR" -maxdepth 1 -name '*plugin*' -print 2>/dev/null > "$candidates_file" || true
+  local plain_find_status=0
+  find "$PLUGIN_BIN_DIR" -maxdepth 1 -type f -name '*plugin*' -perm /111 -print 2>/dev/null > "$candidates_file" || plain_find_status=$?
+  if { [[ ! -s "$candidates_file" ]] || (( plain_find_status != 0 )); } && command -v sudo >/dev/null 2>&1; then
+    sudo find "$PLUGIN_BIN_DIR" -maxdepth 1 -type f -name '*plugin*' -perm /111 -print 2>/dev/null > "$candidates_file" || true
   fi
   while IFS= read -r candidate; do
     if is_executable_path "$candidate"; then
@@ -96,6 +107,9 @@ find_plugin_installer() {
   done < "$candidates_file"
 
   candidate="$(command -v opensearch-dashboards-plugin 2>/dev/null || true)"
+  if [[ -z "$candidate" ]] && command -v sudo >/dev/null 2>&1; then
+    candidate="$(sudo sh -c 'command -v opensearch-dashboards-plugin' 2>/dev/null || true)"
+  fi
   if [[ -n "$candidate" ]] && is_executable_path "$candidate"; then
     PLUGIN_CLI="$candidate"
     INSTALLER_SOURCE="PATH: $candidate"
@@ -379,6 +393,14 @@ if [[ "$PLUGIN_OWNER" != "root" && "$(id -un)" != "$PLUGIN_OWNER" ]] && ! comman
 fi
 echo "Plugin directory owner: $PLUGIN_OWNER (UID:GID $PLUGIN_OWNER_UID:$PLUGIN_OWNER_GID)"
 
+if NODE_RUNTIME_OUTPUT="$(run_as_plugin_owner "$DASHBOARD_HOME/bin/opensearch-dashboards" --version 2>&1)"; then
+  printf 'Dashboard Node runtime works as %s: %s\n' "$PLUGIN_OWNER" "$NODE_RUNTIME_OUTPUT"
+else
+  printf 'Dashboard Node runtime check failed as %s. The wrapper could not run its bundled Node runtime.\n%s\n' \
+    "$PLUGIN_OWNER" "$NODE_RUNTIME_OUTPUT" >&2
+  exit 1
+fi
+
 BACKUP_DIR="$DIST_ROOT/backups"
 BACKUP_FILE="$BACKUP_DIR/wazuh-plugin-${RUN_ID}.tar.gz"
 if [[ -f "$BACKUP_FILE" ]]; then
@@ -482,7 +504,7 @@ import sys
 print(Path(sys.argv[1]).resolve().as_uri())
 PY
 )"
-  if run_plugin_installer install --batch "$PLUGIN_FILE_URI" >>"$INSTALL_LOG" 2>&1; then
+  if run_plugin_installer install "$PLUGIN_FILE_URI" --batch >>"$INSTALL_LOG" 2>&1; then
     :
   else
     install_status=$?
