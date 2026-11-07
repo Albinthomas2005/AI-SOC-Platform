@@ -14,7 +14,7 @@ PROJECT_DIR = Path(__file__).resolve().parent
 load_dotenv(PROJECT_DIR / ".env")
 
 sys.path.insert(0, str(PROJECT_DIR))
-from gemini_service import explain_alert
+from gemini_service import DEFAULT_GROQ_MODEL, explain_alert
 from privacy_filter import sanitize_alert
 
 PASSWORD_FILE = PROJECT_DIR / "secrets" / "opensearch_ai_password"
@@ -35,7 +35,7 @@ def save_explanation(alert, explanation):
         "alert_id": str(alert_id),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "source": "wazuh-groq-integration",
-        "ai_model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        "ai_model": os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL),
         "ai_explanation": explanation,
         "sanitized_alert": alert,
         "status": "analyzed"

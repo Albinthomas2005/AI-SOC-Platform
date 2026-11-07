@@ -5,6 +5,11 @@ import os
 import re
 
 from dotenv import load_dotenv
+
+# Load environment variables before importing the AI service so it sees the
+# configured model and credentials.
+load_dotenv()
+
 from flask import (
     Flask,
     jsonify,
@@ -31,9 +36,6 @@ from privacy_filter import (
     sanitize_alert,
     sanitize_text,
 )
-
-# Load environment variables from the local .env file.
-load_dotenv()
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024

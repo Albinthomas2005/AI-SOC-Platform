@@ -428,6 +428,65 @@ class TestGenerateReportAPI(unittest.TestCase):
             sent_system_prompt.split("System context ", 1)[1], sent_prompt
         )
 
+    def test_model_is_read_from_environment_at_call_time(self):
+        from types import SimpleNamespace
+        from gemini_service import _generate
+
+        completion = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+        )
+        create = Mock(return_value=completion)
+        client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+        with patch.dict(
+            os.environ,
+            {"GROQ_API_KEY": "synthetic-test-key", "GROQ_MODEL": "custom/model"},
+        ), patch("gemini_service.Groq", return_value=client):
+            _generate("test prompt")
+
+        self.assertEqual(create.call_args.kwargs["model"], "custom/model")
+
+    def test_reasoning_parameters_are_limited_to_gpt_oss_models(self):
+        from types import SimpleNamespace
+        from gemini_service import _generate
+
+        for model_name, should_include_reasoning in (
+            ("openai/gpt-oss-20b", True),
+            ("llama-3.3-70b-versatile", False),
+        ):
+            with self.subTest(model=model_name):
+                completion = SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(message=SimpleNamespace(content="ok"))
+                    ]
+                )
+                create = Mock(return_value=completion)
+                client = SimpleNamespace(
+                    chat=SimpleNamespace(
+                        completions=SimpleNamespace(create=create)
+                    )
+                )
+                with patch.dict(
+                    os.environ,
+                    {
+                        "GROQ_API_KEY": "synthetic-test-key",
+                        "GROQ_MODEL": model_name,
+                    },
+                ), patch("gemini_service.Groq", return_value=client):
+                    _generate("test prompt")
+
+                call_params = create.call_args.kwargs
+                self.assertEqual(call_params["model"], model_name)
+                self.assertEqual(
+                    "reasoning_effort" in call_params,
+                    should_include_reasoning,
+                )
+                self.assertEqual(
+                    "include_reasoning" in call_params,
+                    should_include_reasoning,
+                )
+
     def test_legacy_report_improvement_sanitizes_analyst_notes(self):
         from types import SimpleNamespace
         from gemini_service import improve_report
