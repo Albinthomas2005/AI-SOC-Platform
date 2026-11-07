@@ -21,7 +21,19 @@ The dashboard does not send provider credentials to the browser. Report drafts a
 
 ## Quick start
 
-See [backend setup](backend/README.md) and [installation notes](documentation/installation.md). Keep the backend bound to loopback unless the legacy form routes are separately secured. Configure the same strong internal token in the backend's protected environment and the Wazuh Dashboard server environment; never commit it.
+See [backend setup](backend/README.md) and [installation notes](documentation/installation.md). Configure the same strong internal token in the backend's protected environment and the Wazuh Dashboard server environment; never commit it.
+
+## Project status
+
+| Area | Status |
+|---|---|
+| AI Alert Analysis in the dashboard | Verified in the dashboard |
+| Backend unit tests | Passing locally (66 tests) |
+| Backend CI | Root GitHub Actions workflow is configured; remote run status has not been checked here |
+| Generate Report in the dashboard | Pending end-to-end verification |
+| Dashboard plugin rebuild with the 45-second timeout | Pending |
+| AI SOC Dashboard page | Pending end-to-end verification |
+| Synthetic evaluation results | Pending; see [evaluation report](documentation/evaluation.md) |
 
 ## Validation
 
