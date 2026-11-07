@@ -44,7 +44,15 @@ alerts file. The importer refuses files with the world-writable permission bit.
 
 ## Internal AI analysis API
 
-The Flask service exposes only two application endpoints. `POST /api/ai/analyze-alert`
+The provider defaults to Groq. To select local Ollama, set
+`SOC_AI_PROVIDER=ollama`, `OLLAMA_BASE_URL=http://127.0.0.1:11434`, and
+`OLLAMA_MODEL` to a model already installed in your local Ollama instance.
+The backend accepts only `localhost` or loopback IPs for `OLLAMA_BASE_URL`.
+Ollama requests are sent to `/api/chat`; the model must support the chat
+endpoint. No provider credentials are required for this local option. This
+adapter is covered by mocked tests; a real Ollama model has not been run here.
+
+The Flask service exposes three token-protected application endpoints. `POST /api/ai/analyze-alert`
 accepts a Wazuh alert for trusted services that need an AI explanation. It requires a bearer token in the
 `SOC_AI_INTERNAL_TOKEN` environment variable, accepts a JSON object containing
 an `alert` object, sanitizes the alert before analysis, and returns JSON. The
@@ -84,7 +92,20 @@ are not saved by this endpoint, and do not include related-log searches.
 Analyst-edited Markdown export is performed in the dashboard browser; keep the
 exported file in an approved case-management location if it must be retained.
 There are no form-based analysis, report-improvement, or report-export routes.
-Both application endpoints require the internal bearer token.
+All three application endpoints require the internal bearer token.
+
+`POST /api/ai/analysis/<analysis_id>/decision` records `approved`, `edited`,
+or `rejected` for an existing analysis. An optional note and decision timestamp
+are saved with the sanitized evidence and original AI draft in the local
+SQLite database. `edited` decisions also store the revised text without
+overwriting the original draft. This endpoint is intended only for the
+authenticated Dashboard server, which proxies the signed-in analyst's choice.
+
+The default provider is Groq. For a local Ollama instance, set
+`SOC_AI_PROVIDER=ollama`, `OLLAMA_BASE_URL` to a localhost or loopback URL, and
+`OLLAMA_MODEL` to a model already installed locally. Ollama requests use
+`/api/chat`; the adapter has mocked tests but has not been tested against a
+running Ollama service.
 
 Generate a strong token locally with:
 

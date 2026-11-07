@@ -43,7 +43,8 @@ flowchart LR
 The browser never receives the Groq key or the backend internal token. The
 Dashboard server performs the selected-alert lookup as the signed-in user;
 the backend independently reapplies its allowlist. Only the Dashboard service
-and the backend are expected to use the internal token.
+and the backend are expected to use the internal token. The provider defaults
+to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
 
 ## Repository map
 
@@ -63,7 +64,7 @@ and the backend are expected to use the internal token.
 
 | Feature | Status |
 |---|---|
-| Backend API input validation, allowlisting, and privacy tests | Verified by local unit tests (86 passed in the latest run during this work) |
+| Backend API input validation, allowlisting, and privacy tests | Verified by local unit tests (88 passed in the latest run during this work) |
 | Live Groq analysis from this branch | Not yet verified; no provider call was made |
 | Wazuh Dashboard plugin build after portfolio changes | Not yet verified; Dashboard dependencies are not installed here |
 | AI Alert Analysis in a live Dashboard | Not yet verified in this work session |
@@ -184,6 +185,11 @@ accounts, execute remediation, or replace Wazuh access control.
 
 Read [Privacy](docs/PRIVACY.md) and [Limitations](docs/LIMITATIONS.md) before
 connecting production data.
+
+For a local model, configure `SOC_AI_PROVIDER=ollama` and set `OLLAMA_MODEL`
+to a model already installed in Ollama. See the provider settings in
+[`backend/README.md`](backend/README.md). The adapter has mocked tests; a live
+Ollama installation has not yet been verified.
 
 ## Roadmap
 
