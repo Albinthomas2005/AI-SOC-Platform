@@ -38,7 +38,13 @@ jobs:
           RUN_CHECKS: ${{ inputs.run_checks }}
         run: |
           set -euo pipefail
+          # The bind-mounted plugin directory is owned by the GitHub runner.
+          # Match that UID/GID inside the container so yarn can create node_modules.
+          container_uid="$(id -u)"
+          container_gid="$(id -g)"
           docker run --rm \
+            --user "${container_uid}:${container_gid}" \
+            -e HOME=/tmp \
             -e OPENSEARCH_DASHBOARDS_VERSION=${{ steps.versions.outputs.version }} \
             -e RUN_CHECKS="$RUN_CHECKS" \
             -v "${GITHUB_WORKSPACE}/wazuh-dashboard/plugins/main:/home/node/kbn/plugins/wazuh" \
