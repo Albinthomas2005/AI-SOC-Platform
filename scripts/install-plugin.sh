@@ -11,6 +11,7 @@ DASHBOARD_HOME="${DASHBOARD_HOME:-/usr/share/wazuh-dashboard}"
 DASHBOARD_SERVICE="${DASHBOARD_SERVICE:-wazuh-dashboard}"
 DASHBOARD_URL="${DASHBOARD_URL:-https://localhost:5601}"
 DASHBOARD_HEALTH_URL="${DASHBOARD_HEALTH_URL:-${DASHBOARD_URL%/}/api/status}"
+DASHBOARD_OSD_VERSION="${DASHBOARD_OSD_VERSION:-}"
 PLUGIN_ID=wazuh
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -130,22 +131,104 @@ if [[ -z "$ZIP_OSD_VERSION" || "$ZIP_OSD_VERSION" == "opensearchDashboards" ]]; 
   echo "WARNING: plugin ZIP does not contain a resolved OpenSearch Dashboards version; refusing to install." >&2
   exit 1
 fi
-if [[ ! -f "$DASHBOARD_PACKAGE" ]]; then
-  echo "Cannot read Dashboard version: $DASHBOARD_PACKAGE is missing." >&2
+read_dashboard_file() {
+  local path="$1"
+  local contents
+  if contents="$(cat "$path" 2>/dev/null)"; then
+    printf '%s' "$contents"
+    return 0
+  fi
+  if (( EUID != 0 )) && command -v sudo >/dev/null 2>&1 && contents="$(sudo cat "$path" 2>/dev/null)"; then
+    printf '%s' "$contents"
+    return 0
+  fi
+  return 1
+}
+
+json_version() {
+  python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("version", "") if isinstance(d, dict) else "")' <<<"$1" 2>/dev/null || true
+}
+
+json_osd_package_version() {
+  python3 -c 'import json,sys; d=json.load(sys.stdin); n=str(d.get("name", "")).lower().replace("_", "-"); print(d.get("version", "") if isinstance(d, dict) and "opensearch-dashboard" in n else "")' <<<"$1" 2>/dev/null || true
+}
+
+dashboard_cli_version() {
+  local output
+  if output="$("$DASHBOARD_HOME/bin/opensearch-dashboards" --version 2>&1)"; then
+    :
+  elif (( EUID != 0 )) && command -v sudo >/dev/null 2>&1 && output="$(sudo "$DASHBOARD_HOME/bin/opensearch-dashboards" --version 2>&1)"; then
+    :
+  else
+    return 1
+  fi
+  python3 -c 'import re,sys; m=re.search(r"(?<![0-9])([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)", sys.stdin.read()); print(m.group(1) if m else "")' <<<"$output"
+}
+
+DASHBOARD_VERSION=""
+DASHBOARD_VERSION_SOURCE=""
+WAZUH_PACKAGE_VERSION=""
+VERSION_TRIED=()
+
+VERSION_TRIED+=("$DASHBOARD_PACKAGE")
+if DASHBOARD_PACKAGE_JSON="$(read_dashboard_file "$DASHBOARD_PACKAGE")"; then
+  DASHBOARD_VERSION="$(json_version "$DASHBOARD_PACKAGE_JSON")"
+  if [[ -n "$DASHBOARD_VERSION" ]]; then
+    DASHBOARD_VERSION_SOURCE="$DASHBOARD_PACKAGE"
+  fi
+fi
+
+if [[ -z "$DASHBOARD_VERSION" ]]; then
+  VERSION_TRIED+=("package.json files within depth 2 named for OpenSearch Dashboards")
+  mapfile -t DASHBOARD_PACKAGE_CANDIDATES < <(find "$DASHBOARD_HOME" -maxdepth 2 -type f -name package.json -print 2>/dev/null)
+  for package_path in "${DASHBOARD_PACKAGE_CANDIDATES[@]}"; do
+    [[ "$package_path" == "$DASHBOARD_PACKAGE" ]] && continue
+    if DASHBOARD_PACKAGE_JSON="$(read_dashboard_file "$package_path")"; then
+      candidate_version="$(json_osd_package_version "$DASHBOARD_PACKAGE_JSON")"
+      if [[ -n "$candidate_version" ]]; then
+        DASHBOARD_VERSION="$candidate_version"
+        DASHBOARD_VERSION_SOURCE="$package_path"
+        break
+      fi
+    fi
+  done
+fi
+
+if [[ -z "$DASHBOARD_VERSION" ]]; then
+  VERSION_TRIED+=("$DASHBOARD_HOME/bin/opensearch-dashboards --version")
+  if [[ -x "$DASHBOARD_HOME/bin/opensearch-dashboards" ]]; then
+    DASHBOARD_VERSION="$(dashboard_cli_version || true)"
+    if [[ -n "$DASHBOARD_VERSION" ]]; then
+      DASHBOARD_VERSION_SOURCE="$DASHBOARD_HOME/bin/opensearch-dashboards --version"
+    fi
+  fi
+fi
+
+if [[ -z "$DASHBOARD_VERSION" ]]; then
+  VERSION_TRIED+=("dpkg-query or rpm -q wazuh-dashboard (Wazuh package version only)")
+  if command -v dpkg-query >/dev/null 2>&1; then
+    WAZUH_PACKAGE_VERSION="$(dpkg-query -W -f='${Version}' wazuh-dashboard 2>/dev/null || true)"
+  elif command -v rpm >/dev/null 2>&1; then
+    WAZUH_PACKAGE_VERSION="$(rpm -q --qf '%{VERSION}-%{RELEASE}' wazuh-dashboard 2>/dev/null || true)"
+  fi
+  if [[ -n "$WAZUH_PACKAGE_VERSION" ]]; then
+    printf 'Wazuh Dashboard package version (not the OpenSearch Dashboards version): %s\n' "$WAZUH_PACKAGE_VERSION"
+  fi
+  if [[ -n "$DASHBOARD_OSD_VERSION" ]]; then
+    DASHBOARD_VERSION="$DASHBOARD_OSD_VERSION"
+    DASHBOARD_VERSION_SOURCE='DASHBOARD_OSD_VERSION environment variable (operator supplied)'
+  fi
+fi
+
+if [[ -z "$DASHBOARD_VERSION" ]]; then
+  printf 'Cannot determine the OpenSearch Dashboards version. Tried:\n' >&2
+  printf '  - %s\n' "${VERSION_TRIED[@]}" >&2
+  echo 'If the version is known, rerun with DASHBOARD_OSD_VERSION=<version> (for example 2.19.6).' >&2
   exit 1
 fi
-if [[ -r "$DASHBOARD_PACKAGE" ]]; then
-  DASHBOARD_PACKAGE_JSON="$(cat "$DASHBOARD_PACKAGE")"
-elif (( EUID != 0 )) && command -v sudo >/dev/null 2>&1; then
-  echo "Using sudo to read the system-managed Dashboard package metadata."
-  DASHBOARD_PACKAGE_JSON="$(sudo cat "$DASHBOARD_PACKAGE")"
-else
-  echo "Cannot read Dashboard package metadata at $DASHBOARD_PACKAGE." >&2
-  exit 1
-fi
-DASHBOARD_VERSION="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("version", ""))' <<<"$DASHBOARD_PACKAGE_JSON")"
-printf 'Dashboard version: %s\nPlugin required version: %s\nRepository target: %s\n' \
-  "$DASHBOARD_VERSION" "$ZIP_OSD_VERSION" "$REPO_OSD_VERSION"
+
+printf 'Dashboard OpenSearch Dashboards version: %s (source: %s)\nPlugin required OpenSearch Dashboards version: %s\nRepository target version: %s\n' \
+  "$DASHBOARD_VERSION" "$DASHBOARD_VERSION_SOURCE" "$ZIP_OSD_VERSION" "$REPO_OSD_VERSION"
 if [[ -z "$DASHBOARD_VERSION" || "$ZIP_OSD_VERSION" != "$DASHBOARD_VERSION" ]]; then
   echo "WARNING: plugin requires OpenSearch Dashboards $ZIP_OSD_VERSION but the installed Dashboard is $DASHBOARD_VERSION; refusing to install." >&2
   exit 1
