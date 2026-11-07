@@ -84,26 +84,70 @@ is_executable_path() {
   local path_dir
   local status
   path_dir="$(dirname "$path")"
-  if [[ ! -r "$path_dir" || ! -x "$path_dir" ]]; then
+  # os.access checks access for this process without probing candidate files
+  # through Bash conditionals. If the directory cannot be traversed/read, all
+  # candidate metadata checks are performed by sudo.
+  local directory_accessible
+  if directory_accessible="$(python3 - "$path_dir" <<'PY'
+import os
+import sys
+print("yes" if os.access(sys.argv[1], os.R_OK | os.X_OK) else "no")
+PY
+)"; then
+    :
+  else
+    status=$?
     if [[ "$DEBUG" == "1" ]]; then
-      printf 'DEBUG: candidate %s; directory inaccessible, using sudo test -x\n' "$path" >&2
+      printf 'DEBUG: candidate %s; command: python3 os.access(%q, R_OK|X_OK); exit=%s\n' "$path" "$path_dir" "$status" >&2
     fi
-    if sudo test -x "$path"; then
-      if sudo test -f "$path"; then
-        status=0
-      else
-        status=$?
-      fi
+    return 1
+  fi
+  if [[ "$DEBUG" == "1" ]]; then
+    printf 'DEBUG: candidate %s; command: python3 os.access(%q, R_OK|X_OK); exit=0 result=%s\n' "$path" "$path_dir" "$directory_accessible" >&2
+  fi
+
+  if [[ "$directory_accessible" == "yes" ]]; then
+    if [[ "$DEBUG" == "1" ]]; then
+      printf 'DEBUG: candidate %s; command: [[ -x %q && -f %q ]]\n' "$path" "$path" "$path" >&2
+    fi
+    if [[ -x "$path" && -f "$path" ]]; then
+      status=0
     else
       status=$?
     fi
-  elif [[ -x "$path" && -f "$path" ]]; then
+    if [[ "$DEBUG" == "1" ]]; then
+      printf 'DEBUG: candidate %s; command exit=%s\n' "$path" "$status" >&2
+    fi
+    (( status == 0 ))
+    return
+  fi
+
+  if [[ "$DEBUG" == "1" ]]; then
+    printf 'DEBUG: candidate %s; directory inaccessible; privileged checks only\n' "$path" >&2
+  fi
+  if [[ "$DEBUG" == "1" ]]; then
+    printf 'DEBUG: candidate %s; command: sudo test -x %q\n' "$path" "$path" >&2
+  fi
+  if sudo test -x "$path"; then
     status=0
   else
     status=$?
   fi
   if [[ "$DEBUG" == "1" ]]; then
-    printf 'DEBUG: candidate check %s exit=%s\n' "$path" "$status" >&2
+    printf 'DEBUG: candidate %s; command exit=%s\n' "$path" "$status" >&2
+  fi
+  (( status == 0 )) || return 1
+
+  if [[ "$DEBUG" == "1" ]]; then
+    printf 'DEBUG: candidate %s; command: sudo test -f %q\n' "$path" "$path" >&2
+  fi
+  if sudo test -f "$path"; then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ "$DEBUG" == "1" ]]; then
+    printf 'DEBUG: candidate %s; command exit=%s\n' "$path" "$status" >&2
   fi
   (( status == 0 ))
 }
@@ -123,14 +167,17 @@ find_plugin_installer() {
     fi
   done
 
+  if [[ "$DEBUG" == "1" ]]; then
+    printf "DEBUG: candidate search; command: sudo find %q -maxdepth 1 -type f -name '*plugin*' -print\n" "$PLUGIN_BIN_DIR" >&2
+  fi
   if candidates="$(sudo find "$PLUGIN_BIN_DIR" -maxdepth 1 -type f -name '*plugin*' -print 2>/dev/null)"; then
     if [[ "$DEBUG" == "1" ]]; then
-      echo 'DEBUG: sudo find plugin candidates exit=0' >&2
+      echo 'DEBUG: candidate search; command exit=0' >&2
     fi
   else
     local find_status=$?
     if [[ "$DEBUG" == "1" ]]; then
-      printf 'DEBUG: sudo find %s exit=%s\n' "$PLUGIN_BIN_DIR" "$find_status" >&2
+      printf 'DEBUG: candidate search; command exit=%s\n' "$find_status" >&2
     fi
   fi
   while IFS= read -r candidate; do
@@ -150,7 +197,7 @@ find_plugin_installer() {
     candidate=""
   fi
   if [[ "$DEBUG" == "1" ]]; then
-    printf 'DEBUG: PATH lookup opensearch-dashboards-plugin exit=%s\n' "$path_lookup_status" >&2
+    printf 'DEBUG: candidate PATH:opensearch-dashboards-plugin; command: command -v opensearch-dashboards-plugin; exit=%s\n' "$path_lookup_status" >&2
   fi
   if [[ -z "$candidate" ]] && command -v sudo >/dev/null 2>&1; then
     if candidate="$(sudo sh -c 'command -v opensearch-dashboards-plugin' 2>/dev/null)"; then
@@ -160,7 +207,7 @@ find_plugin_installer() {
       candidate=""
     fi
     if [[ "$DEBUG" == "1" ]]; then
-      printf 'DEBUG: sudo PATH lookup opensearch-dashboards-plugin exit=%s\n' "$path_lookup_status" >&2
+      printf 'DEBUG: candidate PATH:opensearch-dashboards-plugin; command: sudo sh -c command -v; exit=%s\n' "$path_lookup_status" >&2
     fi
   fi
   if [[ -n "$candidate" ]] && is_executable_path "$candidate"; then
