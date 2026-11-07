@@ -31,8 +31,9 @@ describe('AIAnalysisTab', () => {
     jest.clearAllMocks();
   });
 
-  it('requests analysis through the Wazuh server and displays it as text', async () => {
-    const analysis = '<script>not executable</script>\nObserved facts';
+  it('requests analysis and safely renders the response as Markdown', async () => {
+    const analysis =
+      '# Findings\n\n**Observed facts**\n\n<script>not executable</script>';
     (WzRequest.genericReq as jest.Mock).mockResolvedValue({
       data: { ok: true, analysis },
     });
@@ -40,10 +41,12 @@ describe('AIAnalysisTab', () => {
     const { container } = render(<AIAnalysisTab {...alertReference} />);
     fireEvent.click(screen.getByRole('button', { name: 'Analyze alert' }));
 
-    await waitFor(() => {
-      expect(container.querySelector('pre')?.textContent).toBe(analysis);
-    });
+    await waitFor(() =>
+      expect(container.querySelector('h1')).toHaveTextContent('Findings'),
+    );
+    expect(container.querySelector('strong')).toHaveTextContent('Observed facts');
     expect(document.querySelector('script')).toBeNull();
+    expect(container.querySelector('pre')).toBeNull();
     expect(WzRequest.genericReq).toHaveBeenCalledWith(
       'POST',
       '/api/ai/analyze-alert',
