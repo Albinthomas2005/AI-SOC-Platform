@@ -85,8 +85,20 @@ def analyze_alert_api():
     if not isinstance(alert, dict) or not alert:
         return jsonify(ok=False, error="A valid alert object is required"), 400
 
+    privacy_context = new_privacy_context()
+    minimized_alert = minimize_report_evidence(
+        alert, privacy_context=privacy_context
+    )
+    if not minimized_alert:
+        return jsonify(
+            ok=False,
+            error="Alert has no analyzable fields",
+        ), 422
+
     try:
-        safe_alert = sanitize_alert(alert)
+        safe_alert = sanitize_alert(
+            minimized_alert, privacy_context=privacy_context
+        )
         analysis = explain_alert(safe_alert)
     except GroqUnavailable:
         return jsonify(

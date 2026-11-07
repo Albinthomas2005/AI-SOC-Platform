@@ -48,23 +48,13 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
         self.assertFalse(response.get_json()["ok"])
 
     def test_valid_token_analyzes_only_sanitized_alert(self):
-        original = {"rule": {"id": "1001"}, "password": "private"}
-        sanitized = {"rule": {"id": "1001"}, "password": "[REDACTED_SECRET]"}
-        call_order = []
+        original = {
+            "rule": {"id": "1001", "description": "Synthetic test"},
+            "password": "private",
+            "full_log": "raw secret log",
+        }
 
-        def sanitize(alert):
-            call_order.append("sanitize")
-            self.assertEqual(alert, original)
-            return sanitized
-
-        def explain(alert):
-            call_order.append("explain")
-            self.assertEqual(alert, sanitized)
-            return "Analysis text"
-
-        with patch("app.sanitize_alert", side_effect=sanitize), patch(
-            "app.explain_alert", side_effect=explain
-        ):
+        with patch("app.explain_alert", return_value="Analysis text") as explain:
             response = self.post_alert(original)
 
         self.assertEqual(response.status_code, 200)
@@ -72,12 +62,66 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
             response.get_json(),
             {"ok": True, "analysis": "Analysis text"},
         )
-        self.assertEqual(call_order, ["sanitize", "explain"])
+        self.assertEqual(
+            explain.call_args.args[0],
+            {"rule": {"id": "1001", "description": "Synthetic test"}},
+        )
+
+    def test_non_allowlisted_alert_fields_never_reach_groq(self):
+        from types import SimpleNamespace
+
+        completion = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+        )
+        create = Mock(return_value=completion)
+        client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+        alert = {
+            "rule": {"id": "1001"},
+            "data": {
+                "dstip": "192.168.1.7",
+                "dstuser": "synthetic-user-value",
+            },
+            "full_log": "synthetic-full-log-value",
+        }
+
+        with patch.dict(os.environ, {"GROQ_API_KEY": "synthetic-test-key"}), patch(
+            "groq_service.Groq", return_value=client
+        ):
+            response = self.post_alert(alert)
+
+        self.assertEqual(response.status_code, 200)
+        messages = create.call_args.kwargs["messages"]
+        serialized_messages = str(messages)
+        for excluded in (
+            "full_log",
+            "synthetic-full-log-value",
+            "dstuser",
+            "synthetic-user-value",
+        ):
+            self.assertNotIn(excluded, serialized_messages)
+
+    def test_alert_with_no_allowlisted_fields_returns_422(self):
+        with patch("app.explain_alert") as explain:
+            response = self.post_alert(
+                {
+                    "full_log": "synthetic raw log",
+                    "data": {"dstuser": "synthetic-user"},
+                }
+            )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.get_json(),
+            {"ok": False, "error": "Alert has no analyzable fields"},
+        )
+        explain.assert_not_called()
 
     def test_private_addresses_are_pseudonymized_before_alert_analysis(self):
         alert = {
             "data": {"srcip": "192.168.5.10", "dstip": "192.168.5.10"},
-            "description": "Connection from 192.168.5.10",
+            "rule": {"description": "Connection from 192.168.5.10"},
         }
         with patch("app.explain_alert", return_value="Synthetic analysis") as explain:
             response = self.post_alert(alert)
@@ -87,7 +131,7 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
         pseudonyms = (
             supplied_alert["data"]["srcip"],
             supplied_alert["data"]["dstip"],
-            supplied_alert["description"].split()[-1],
+            supplied_alert["rule"]["description"].split()[-1],
         )
         self.assertEqual(len(set(pseudonyms)), 1)
         self.assertNotIn("192.168.5.10", str(supplied_alert))
@@ -131,7 +175,9 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_provider_failure_returns_safe_json_error(self):
-        with patch("app.sanitize_alert", side_effect=lambda alert: alert), patch(
+        with patch(
+            "app.sanitize_alert", side_effect=lambda alert, **kwargs: alert
+        ), patch(
             "app.explain_alert",
             side_effect=GroqUnavailable("private provider detail"),
         ):
@@ -148,7 +194,9 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
         self.assertNotIn(b"private provider detail", response.data)
 
     def test_unexpected_error_returns_safe_json(self):
-        with patch("app.sanitize_alert", side_effect=lambda alert: alert), patch(
+        with patch(
+            "app.sanitize_alert", side_effect=lambda alert, **kwargs: alert
+        ), patch(
             "app.explain_alert", side_effect=RuntimeError("private detail")
         ):
             response = self.post_alert({"rule": {"id": "1001"}})
