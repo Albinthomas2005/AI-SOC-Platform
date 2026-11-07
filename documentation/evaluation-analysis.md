@@ -17,7 +17,16 @@ scenario definitions; exact omitted wording cannot be recovered.
 No scenario failed the prohibited-claims check, so there is no category (c)
 failure in this baseline.
 
-The two category (d) synonym groups are limited to equivalent descriptions of
-the same alert detail. Expected MITRE ids and prohibited-claim phrases remain
-unchanged. Other keyword failures are left strict until the response text can
-show whether a valid synonym was actually rejected.
+The two likely category (d) synonym groups are limited to equivalent
+descriptions of the same alert detail:
+
+- Suspicious connection: `non-standard port` accepts `nonstandard port`,
+  `unusual port`, and `uncommon port`.
+- New user account: `new account` accepts `new user account`, `account created`,
+  and `user created`; its creation keyword accepts `created`, `create`, or
+  `provisioned`.
+
+These are inferred categories because the baseline did not retain response
+text. Expected MITRE ids and prohibited-claim phrases are unchanged. Other
+keyword checks remain strict until response text demonstrates a valid synonym
+was rejected.
