@@ -3,6 +3,8 @@ import hmac
 import json
 import os
 import re
+import threading
+import time
 import uuid
 from contextlib import closing
 from datetime import datetime, timezone
@@ -33,6 +35,7 @@ from threat_intel import (
 )
 from hunting import register_hunting_routes
 from roles_audit import enforce_route_access, register_admin_routes
+from retention import register_retention_routes
 from groq_service import (
     explain_alert,
     generate_investigation_report,
@@ -48,9 +51,24 @@ from privacy_filter import (
 )
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
+
+
+def configured_max_request_bytes(value=None):
+    raw_value = os.environ.get("SOC_AI_MAX_REQUEST_BYTES", str(1 * 1024 * 1024)) if value is None else value
+    try:
+        limit = int(raw_value)
+    except (TypeError, ValueError):
+        raise RuntimeError("SOC_AI_MAX_REQUEST_BYTES must be an integer") from None
+    if not 1024 <= limit <= 10 * 1024 * 1024:
+        raise RuntimeError("SOC_AI_MAX_REQUEST_BYTES must be between 1024 and 10485760")
+    return limit
+
+
+app.config["MAX_CONTENT_LENGTH"] = configured_max_request_bytes()
 MAX_REPORT_REQUEST_BYTES = 256 * 1024
 MAX_ANALYST_NOTES_CHARS = 4000
+RATE_LIMIT_BUCKETS = {}
+RATE_LIMIT_LOCK = threading.Lock()
 
 
 @app.errorhandler(413)
@@ -72,6 +90,29 @@ def handle_request_too_large(error):
 @app.before_request
 def initialize_database_for_request():
     init_db()
+
+
+@app.before_request
+def enforce_request_rate_limit():
+    if not request.path.startswith(("/api/", "/training/")):
+        return None
+    try:
+        limit = int(os.environ.get("SOC_AI_RATE_LIMIT_PER_MINUTE", "120"))
+    except ValueError:
+        limit = 120
+    limit = max(1, min(limit, 10000))
+    now = time.monotonic()
+    username = request.headers.get("X-SOC-User", "local-analyst")
+    key = (request.remote_addr or "unknown", username, request.endpoint or request.path)
+    with RATE_LIMIT_LOCK:
+        window = RATE_LIMIT_BUCKETS.get(key)
+        if window is None or now - window[0] >= 60:
+            RATE_LIMIT_BUCKETS[key] = [now, 1]
+            return None
+        if window[1] >= limit:
+            return jsonify(ok=False, error="Request rate limit exceeded"), 429
+        window[1] += 1
+    return None
 
 
 @app.before_request
@@ -99,6 +140,7 @@ register_training_routes(app, has_valid_internal_token)
 register_incident_routes(app, has_valid_internal_token)
 register_hunting_routes(app, has_valid_internal_token)
 register_admin_routes(app, has_valid_internal_token)
+register_retention_routes(app, has_valid_internal_token)
 
 
 @app.route("/api/threat-intel/lookup", methods=["POST"])

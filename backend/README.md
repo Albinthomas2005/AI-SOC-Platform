@@ -257,6 +257,19 @@ changes, imports, training progress exports, and role changes. SQLite triggers
 reject updates and deletes to the audit table. Route-role and audit behavior
 is covered with temporary-database tests.
 
+`POST /api/admin/retention/purge` is admin-only and defaults to `{}` (dry run).
+`{"dry_run": false}` performs deletion. Alert rows, raw/imported alert data,
+AI/hunting reports, and training attempt reports use configurable
+`SOC_AI_ALERT_RETENTION_DAYS` (90 by default) and
+`SOC_AI_REPORT_RETENTION_DAYS` (180 by default). The service enforces
+`SOC_AI_MAX_REQUEST_BYTES` (1 MiB default, maximum 10 MiB) and
+`SOC_AI_RATE_LIMIT_PER_MINUTE` (120 per route and client by default).
+
+The optional synthetic local load check is `python scripts/load-test.py` from
+the repository root. Set `SOC_AI_INTERNAL_TOKEN`; it only requests the
+authenticated training scenario list. The load script is documented and has
+not been run.
+
 ## Security notes
 
 - Never commit API keys, passwords, private keys, databases, or real security logs.

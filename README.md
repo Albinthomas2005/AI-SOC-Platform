@@ -109,10 +109,11 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
 | Threat-intel API extracts public IOCs, filters private addresses/internal hostnames, and supports VirusTotal/AbuseIPDB through env-keyed adapters with SQLite cache and per-provider limits. AI summarizes only returned provider data. | Threat-intel UI and provider behavior with real API credentials. |
 | Hunting proposals validate a read-only OpenSearch query against an index/clause/field/size allowlist and local MITRE catalog; the plugin executes as the signed-in OpenSearch user and saves a result interpretation. | Hunting page and browser verification. Plugin server tests are written, not run. |
 | Server-side L1/L2/L3/admin route gates and SQLite role assignments; append-only audit records cover analyst decisions, incident status changes, imports, progress exports, and role changes. Admin routes manage roles and view the audit log. | Admin UI and browser verification. Admin bootstrap requires `SOC_AI_ADMIN_USERS` in the backend environment. |
+| Admin-only retention purge covers alert and report tables with a dry-run default, plus configurable request-size and per-route rate limits. `scripts/load-test.py` is documented but not run. | Retention behavior on production data and load-test execution. |
 | Backend, Dashboard server, scripts, and evaluator use `SOC_AI_PORT` (default `5000`). | Live evaluation; the CLI and report path have only been checked with mocks. |
-| Evaluation CLI reads `GROQ_API_KEY` and `SOC_AI_INTERNAL_TOKEN` from the process environment and targets `docs/EVALUATION_RESULTS.md`. | Retention/limits, assistant, remaining plugin screens, and production readiness. |
+| Evaluation CLI reads `GROQ_API_KEY` and `SOC_AI_INTERNAL_TOKEN` from the process environment and targets `docs/EVALUATION_RESULTS.md`. | Assistant, remaining plugin screens, and production readiness. |
 
-For this phase, the backend suite passed **147 tests** and
+For this phase, the backend suite passed **152 tests** and
 `git diff --check` passed. The smoke script, browser UI, plugin build, live
 provider behavior, and live evaluation were not run.
 
