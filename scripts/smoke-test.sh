@@ -80,6 +80,15 @@ PY
   fi
 }
 
+probe_endpoint() {
+  local label="$1" method="$2" path="$3" payload="$4" allowed="$5"
+  request "$method" "$path" "$payload"
+  case " ${allowed} " in
+    *" ${HTTP_STATUS} "*) echo "PASS - ${label} (${method} ${path}, HTTP ${HTTP_STATUS})" ;;
+    *) echo "FAIL - ${label} (${method} ${path}, HTTP ${HTTP_STATUS}; expected ${allowed})"; failures=$((failures + 1)) ;;
+  esac
+}
+
 check_response "scenarios" GET "/training/scenarios" "" 200 scenarios
 check_response "progress" GET "/training/progress" "" 200 progress
 check_response "export data (client-side Markdown source)" GET "/training/progress" "" 200 export
@@ -124,5 +133,14 @@ else
     failures=$((failures + 1))
   done
 fi
+
+# Invalid/minimal requests verify route, auth and role wiring without invoking
+# AI or threat-intelligence providers.
+probe_endpoint "correlation API" POST "/api/correlations" '{}' "400 403"
+probe_endpoint "incident API" GET "/api/incidents" "" "200 403"
+probe_endpoint "threat intel API" POST "/api/threat-intel/lookup" '{}' "400 403"
+probe_endpoint "hunting proposal API" POST "/api/hunts/proposals" '{"question":""}' "400 403"
+probe_endpoint "admin audit API" GET "/api/admin/audit" "" "200 403"
+probe_endpoint "assistant API" POST "/api/assistant/chat" '{}' "400 403"
 
 exit "$failures"

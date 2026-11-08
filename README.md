@@ -100,23 +100,25 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
 
 ## Project status
 
-| Implemented | Pending |
+| Phase | Status |
 |---|---|
-| Backend alert analysis, report generation, analyst decisions, training, and shifts; backend tests use temporary databases and mocked providers. | Browser test and Dashboard plugin build; the selected-alert review test is written, not run. |
-| Selected-alert review now connects report generation and Edit/Approve/Reject actions to backend SQLite decisions. | Screenshots and analyst review of the 16 draft answer keys. |
-| Deterministic event correlation groups alerts by shared host, user, or source IP in a configurable time window and returns evidence timelines; AI summarizes only grouped, privacy-filtered results. | Correlation UI and browser verification. |
-| SQLite incident API creates incidents from alerts or correlation groups, validates status transitions, records assignment/notes/decisions/evidence, and generates Markdown reports. | Incident UI and browser verification. |
-| Threat-intel API extracts public IOCs, filters private addresses/internal hostnames, and supports VirusTotal/AbuseIPDB through env-keyed adapters with SQLite cache and per-provider limits. AI summarizes only returned provider data. | Threat-intel UI and provider behavior with real API credentials. |
-| Hunting proposals validate a read-only OpenSearch query against an index/clause/field/size allowlist and local MITRE catalog; the plugin executes as the signed-in OpenSearch user and saves a result interpretation. | Hunting page and browser verification. Plugin server tests are written, not run. |
-| Server-side L1/L2/L3/admin route gates and SQLite role assignments; append-only audit records cover analyst decisions, incident status changes, imports, progress exports, and role changes. Admin routes manage roles and view the audit log. | Admin UI and browser verification. Admin bootstrap requires `SOC_AI_ADMIN_USERS` in the backend environment. |
-| Admin-only retention purge covers alert and report tables with a dry-run default, plus configurable request-size and per-route rate limits. `scripts/load-test.py` is documented but not run. | Retention behavior on production data and load-test execution. |
-| `/api/assistant/chat` loads only explicitly referenced objects available to the caller's role, cites accessible object IDs, and refuses without evidence; provider prompts pass through the privacy filter. | Assistant panel and browser verification. |
-| Backend, Dashboard server, scripts, and evaluator use `SOC_AI_PORT` (default `5000`). | Live evaluation; the CLI and report path have only been checked with mocks. |
-| Evaluation CLI reads `GROQ_API_KEY` and `SOC_AI_INTERNAL_TOKEN` from the process environment and targets `docs/EVALUATION_RESULTS.md`. | Remaining plugin screens and production readiness. |
+| 1: backend analysis, report review/decisions, training, shifts, port configuration | Implemented, unverified in browser |
+| 4: deterministic correlation API and timeline | Implemented, unverified in browser |
+| 5: incident API, validated status transitions, evidence, notes and reports | Implemented, unverified in browser |
+| 6: public IOC extraction, privacy filtering, provider adapters, cache and limits | Implemented, unverified in browser; live providers not checked |
+| 7: validated read-only hunting workflow | Implemented, unverified in browser |
+| 9: role-scoped evidence assistant | Implemented, unverified in browser |
+| 10a: role enforcement and append-only audit | Implemented, unverified in browser |
+| 10b: dry-run retention and request/rate limits | Implemented, unverified in browser |
+| Plugin workbench for correlation, incidents, intel, hunting, audit and assistant | Implemented, unverified in browser; plugin tests written, not run |
+| Evaluation CLI | Implemented with mocked tests; live evaluation not run |
 
-For this phase, the backend suite passed **157 tests** and
-`git diff --check` passed. The smoke script, browser UI, plugin build, live
-provider behavior, and live evaluation were not run.
+Pending: browser test, Dashboard plugin build, screenshots, analyst review of
+the 16 **DRAFT** answer keys, evaluation rerun/live evaluation, event-correlation
+browser review, production data retention/load test, and production readiness.
+The backend suite has passed **157 tests** in the last recorded run; the smoke
+script, browser UI, plugin build, live provider behavior, and live evaluation
+have not been run for this workbench update.
 
 ## Training Mode
 
