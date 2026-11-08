@@ -1,9 +1,11 @@
 import '@testing-library/jest-dom';
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter, Switch } from 'react-router-dom';
 import NavigationService from '../../react-services/navigation-service';
 import { WzRequest } from '../../react-services/wz-request';
 import { AiSocDashboard } from './index';
+import { aiSocDashboardRoute } from './route';
 import { useAiSocOverview } from './use-ai-soc-overview';
 
 jest.mock('../../react-services/navigation-service', () => ({
@@ -44,6 +46,14 @@ describe('AiSocDashboard', () => {
     render(<AiSocDashboard />);
     expect(screen.getByText('Synthetic alert')).toBeInTheDocument();
     expect(screen.getByText('host-1')).toBeInTheDocument();
+  });
+  it('mounts the dashboard through its production Route component binding', () => {
+    render(
+      <MemoryRouter initialEntries={['/ai-soc-dashboard']}>
+        <Switch>{aiSocDashboardRoute}</Switch>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('heading', { name: 'AI SOC Dashboard' })).toBeInTheDocument();
   });
   it('navigates into the existing Threat Hunting events view', () => {
     const navigateToApp = jest.fn();
