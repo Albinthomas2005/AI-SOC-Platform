@@ -16,6 +16,11 @@ const MAX_AI_ALERT_BYTES = 256 * 1024;
 export function WazuhAiRoutes(router: IRouter) {
   const ctrl = new WazuhAiCtrl();
 
+  router.post({ path: '/api/training/import-alert', validate: { body: schema.object({ index: schema.string(), id: schema.string() }) }, options: { body: { maxBytes: 4096 } } },
+    (context, request, response) => ctrl.importTrainingAlert(context, request, response));
+  router.post({ path: '/api/training/imported-cases/{id}/attempts', validate: { params: schema.object({ id: schema.string() }), body: schema.object({ verdict: schema.string(), report_text: schema.string(), time_spent: schema.number() }) }, options: { body: { maxBytes: 256 * 1024 } } },
+    (context, request, response) => ctrl.proxyTraining(context, request, response, `/imported-cases/${encodeURIComponent(request.params.id)}/attempts`, 'post'));
+
   router.post(
     {
       path: '/api/ai/analyze-alert',

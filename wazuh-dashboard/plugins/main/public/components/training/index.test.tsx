@@ -58,6 +58,20 @@ describe('TrainingPage', () => {
     );
   });
 
+  it('requests server-side MITRE-hidden practice evidence and shows the triage checklist', async () => {
+    render(<TrainingPage />);
+    await screen.findByRole('button', { name: 'Synthetic SSH' });
+    fireEvent.click(screen.getByLabelText('Hide MITRE rule tags (practice mode)'));
+    await waitFor(() => expect(WzRequest.genericReq).toHaveBeenCalledWith(
+      'GET', '/api/training/scenarios?practice_mode=true', undefined,
+      { shouldRetry: false, checkCurrentApiIsUp: false },
+    ));
+    fireEvent.click(screen.getByRole('button', { name: 'Synthetic SSH' }));
+    fireEvent.click(screen.getByText('Triage checklist'));
+    expect(await screen.findByText('What happened?')).toBeInTheDocument();
+    expect(screen.getByText('What did you document?')).toBeInTheDocument();
+  });
+
   it('shows a visible error when the scenario request fails', async () => {
     (WzRequest.genericReq as jest.Mock).mockImplementation((method: string, path: string) =>
       path === '/api/training/scenarios'

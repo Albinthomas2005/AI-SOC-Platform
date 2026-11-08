@@ -271,4 +271,23 @@ describe('training route proxy', () => {
     expect(result.statusCode).toBe(401);
     expect(needle).not.toHaveBeenCalled();
   });
+
+  it('fetches imported practice alerts as the signed-in user and sends only minimized fields', async () => {
+    const context = createContext('signed-in-analyst');
+    needle.mockResolvedValue({ statusCode: 201, body: { ok: true, case: { status: 'unscored - no answer key' } } });
+    const response = createResponse();
+    const result = await controller.importTrainingAlert(context, createRequest(), response as any);
+    expect(result.statusCode).toBe(201);
+    expect(context.search).toHaveBeenCalledWith(expect.objectContaining({
+      index: alertIndex,
+      body: expect.objectContaining({ query: { ids: { values: [alertId] } } }),
+    }));
+    expect(needle).toHaveBeenCalledWith('post', expect.stringMatching(/\/training\/imported-cases$/), expect.objectContaining({
+      user_id: 'signed-in-analyst',
+      alert: expect.objectContaining({ rule: expect.objectContaining({ description: source.rule.description }) }),
+    }), expect.any(Object));
+    const submitted = needle.mock.calls[0][2];
+    expect(JSON.stringify(submitted)).not.toContain('private raw log content');
+    expect(JSON.stringify(submitted)).not.toContain('synthetic-secret');
+  });
 });

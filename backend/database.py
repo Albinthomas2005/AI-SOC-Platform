@@ -122,6 +122,26 @@ def init_db():
                 PRIMARY KEY (shift_id, scenario_id)
             )
         """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS training_imported_cases (
+                case_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                alert_json TEXT NOT NULL
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS training_unscored_attempts (
+                attempt_id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                submitted_at TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                report_text TEXT NOT NULL,
+                time_spent INTEGER NOT NULL,
+                coaching_json TEXT
+            )
+        """)
 
 
 def add_alert(timestamp, severity, rule, source_ip, status="New"):
@@ -251,8 +271,45 @@ def get_training_attempts_for_user(user_id):
     with closing(get_connection()) as connection, connection:
         return connection.execute(
             """SELECT attempt_id, scenario_id, submitted_at, verdict, escalate,
-                      time_spent, score_json
+                      time_spent, score_json, report_text, invalid_mitre_ids_json
                FROM training_attempts WHERE user_id = ? ORDER BY submitted_at DESC""",
+            (user_id,),
+        ).fetchall()
+
+
+def save_training_imported_case(case_id, user_id, created_at, alert):
+    with closing(get_connection()) as connection, connection:
+        connection.execute(
+            "INSERT INTO training_imported_cases (case_id, user_id, created_at, alert_json) VALUES (?, ?, ?, ?)",
+            (case_id, user_id, created_at, json.dumps(alert, ensure_ascii=False)),
+        )
+
+
+def get_training_imported_case(case_id):
+    with closing(get_connection()) as connection, connection:
+        return connection.execute(
+            "SELECT * FROM training_imported_cases WHERE case_id = ?", (case_id,)
+        ).fetchone()
+
+
+def save_training_unscored_attempt(attempt):
+    with closing(get_connection()) as connection, connection:
+        connection.execute(
+            """INSERT INTO training_unscored_attempts
+               (attempt_id, case_id, user_id, submitted_at, verdict, report_text,
+                time_spent, coaching_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (attempt["attempt_id"], attempt["case_id"], attempt["user_id"],
+             attempt["submitted_at"], attempt["verdict"], attempt["report_text"],
+             attempt["time_spent"], json.dumps(attempt["coaching"]) if attempt.get("coaching") else None),
+        )
+
+
+def get_training_unscored_attempts_for_user(user_id):
+    with closing(get_connection()) as connection, connection:
+        return connection.execute(
+            """SELECT attempt_id, case_id, submitted_at, verdict, report_text,
+                      time_spent, coaching_json
+               FROM training_unscored_attempts WHERE user_id = ? ORDER BY submitted_at DESC""",
             (user_id,),
         ).fetchall()
 

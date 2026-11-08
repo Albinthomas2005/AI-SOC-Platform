@@ -1,6 +1,7 @@
 """Server-side deterministic grading for synthetic analyst training scenarios."""
 
 import json
+import copy
 import random
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,7 @@ from groq_service import (
     coach_training_report,
     coach_shift_handover,
 )
+from privacy_filter import new_privacy_context, minimize_report_evidence
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "datasets" / "training"
 VISIBLE_PATH = DATA_DIR / "scenarios.json"
@@ -144,6 +146,12 @@ def register_training_routes(app, has_valid_token):
         if denied:
             return denied
         scenarios = _visible_scenarios()
+        if request.args.get("practice_mode", "false").lower() == "true":
+            scenarios = copy.deepcopy(scenarios)
+            for scenario in scenarios:
+                rule = scenario.get("alert", {}).get("rule", {})
+                if isinstance(rule, dict):
+                    rule.pop("mitre", None)
         return jsonify(ok=True, scenarios=[{k: v for k, v in s.items() if k != "answer_key"} for s in scenarios])
 
     @app.get("/training/scenarios/<scenario_id>")
@@ -154,6 +162,11 @@ def register_training_routes(app, has_valid_token):
         scenario = next((s for s in _visible_scenarios() if s["id"] == scenario_id), None)
         if scenario is None:
             return jsonify(ok=False, error="Scenario not found"), 404
+        scenario = copy.deepcopy(scenario)
+        if request.args.get("practice_mode", "false").lower() == "true":
+            rule = scenario.get("alert", {}).get("rule", {})
+            if isinstance(rule, dict):
+                rule.pop("mitre", None)
         return jsonify(ok=True, scenario={k: v for k, v in scenario.items() if k != "answer_key"})
 
     @app.get("/training/scenarios/<scenario_id>/hints")
@@ -203,6 +216,8 @@ def register_training_routes(app, has_valid_token):
         rows = database.get_training_attempts_for_user(user_id)
         category_stats = {}
         mistakes = {}
+        wrong_verdict_categories = {}
+        review_scenario_ids = []
         verdict_correct = verdict_graded = 0
         durations = []
         history = []
@@ -221,6 +236,23 @@ def register_training_routes(app, has_valid_token):
                     verdict_correct += 1
             for mistake in score.get("mistakes", []):
                 mistakes[mistake] = mistakes.get(mistake, 0) + 1
+            if correct is False:
+                wrong_verdict_categories[category] = wrong_verdict_categories.get(category, 0) + 1
+            try:
+                submitted_at = datetime.fromisoformat(row["submitted_at"].replace("Z", "+00:00"))
+                age = datetime.now(timezone.utc) - submitted_at
+                latest_for_scenario = not any(item["scenario_id"] == row["scenario_id"] for item in history)
+                failed = (score.get("verdict", {}).get("correct") is False or
+                          score.get("escalation", {}).get("correct") is False or
+                          score.get("mitre", {}).get("correct") is False or
+                          score.get("report", {}).get("complete") is False)
+                if latest_for_scenario and failed and age >= timedelta(days=2):
+                    review_scenario_ids.append(row["scenario_id"])
+            except (ValueError, TypeError):
+                pass
+            invalid_ids = json.loads(row["invalid_mitre_ids_json"] or "[]")
+            if invalid_ids:
+                mistakes["invalid_mitre_ids"] = mistakes.get("invalid_mitre_ids", 0) + len(invalid_ids)
             durations.append(row["time_spent"])
             history.append({
                 "attempt_id": row["attempt_id"], "scenario_id": row["scenario_id"],
@@ -228,6 +260,7 @@ def register_training_routes(app, has_valid_token):
                 "submitted_at": row["submitted_at"], "verdict": row["verdict"],
                 "escalate": bool(row["escalate"]), "score": score.get("total", 0),
                 "time_spent": row["time_spent"],
+                "report_text": row["report_text"],
             })
         for stats in category_stats.values():
             stats["accuracy"] = stats["verdict_correct"] / stats["verdict_graded"] if stats["verdict_graded"] else None
@@ -241,10 +274,62 @@ def register_training_routes(app, has_valid_token):
                 ({"mistake": name, "count": count} for name, count in mistakes.items()),
                 key=lambda item: (-item["count"], item["mistake"]),
             ),
+            "mistake_log": ([
+                {"type": "over_escalation", "count": mistakes.get("over_escalation", 0), "hint": "Check whether the evidence supports urgent escalation before raising severity."},
+                {"type": "missing_escalation", "count": mistakes.get("under_escalation", 0), "hint": "Look for impact, persistence, or successful access that needs a second responder."},
+                *[{"type": "wrong_verdict", "category": category, "count": count, "hint": "Compare the alert outcome with corroborating evidence before deciding true positive, false positive, or benign."} for category, count in sorted(wrong_verdict_categories.items())],
+                {"type": "invalid_mitre_ids", "count": mistakes.get("invalid_mitre_ids", 0), "hint": "Choose technique IDs from the local ATT&CK catalog and distinguish a rule tag from confirmed behavior."},
+            ]),
+            "review_scenario_ids": review_scenario_ids,
             "time_per_case": {"average_seconds": sum(durations) / len(durations) if durations else None,
                               "attempts_with_time": len(durations)},
             "attempts": history,
+            "unscored_attempts": [{"attempt_id": row["attempt_id"], "case_id": row["case_id"], "submitted_at": row["submitted_at"], "verdict": row["verdict"], "report_text": row["report_text"], "time_spent": row["time_spent"], "status": "unscored - no answer key"} for row in database.get_training_unscored_attempts_for_user(user_id)],
         })
+
+    @app.post("/training/imported-cases")
+    def import_training_alert():
+        denied = authorized()
+        if denied:
+            return denied
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) - {"alert", "user_id"} or not isinstance(payload.get("alert"), dict):
+            return jsonify(ok=False, error="A minimized Wazuh alert is required"), 400
+        user_id = payload.get("user_id", "local-analyst")
+        if not isinstance(user_id, str) or not user_id or len(user_id) > 200:
+            return jsonify(ok=False, error="Invalid analyst identity"), 400
+        alert = minimize_report_evidence(payload["alert"], privacy_context=new_privacy_context())
+        if not alert:
+            return jsonify(ok=False, error="Alert has no analyzable fields"), 422
+        case_id = uuid.uuid4().hex
+        database.save_training_imported_case(case_id, user_id, datetime.now(timezone.utc).isoformat(), alert)
+        return jsonify(ok=True, case={"id": case_id, "title": "Imported Wazuh alert", "status": "unscored - no answer key", "alert": alert}), 201
+
+    @app.post("/training/imported-cases/<case_id>/attempts")
+    def submit_imported_training_attempt(case_id):
+        denied = authorized()
+        if denied:
+            return denied
+        payload = request.get_json(silent=True)
+        required = {"verdict", "report_text", "time_spent"}
+        if not isinstance(payload, dict) or set(payload) - (required | {"user_id"}) or not required.issubset(payload):
+            return jsonify(ok=False, error="Invalid unscored attempt"), 400
+        user_id = payload.get("user_id", "local-analyst")
+        case = database.get_training_imported_case(case_id)
+        if case is None or case["user_id"] != user_id:
+            return jsonify(ok=False, error="Imported case not found"), 404
+        if not isinstance(payload["verdict"], str) or payload["verdict"] not in VERDICTS or not isinstance(payload["report_text"], str) or len(payload["report_text"]) > MAX_REPORT_CHARS or type(payload["time_spent"]) is not int or not 0 <= payload["time_spent"] <= 86400:
+            return jsonify(ok=False, error="Invalid unscored attempt"), 400
+        scenario = {"id": case_id, "title": "Imported Wazuh alert", "alert": json.loads(case["alert_json"]), "evidence": {"log_lines": [], "context_notes": []}}
+        try:
+            coaching = coach_training_report(payload["report_text"], scenario, "No answer key is available. Provide report-writing coaching only; do not score or infer a correct verdict.")
+        except InvalidAIResponse as error:
+            return jsonify(ok=False, error=f"AI coaching response failed validation: {error}"), 502
+        except GroqUnavailable:
+            return jsonify(ok=False, error="AI coaching is temporarily unavailable"), 503
+        attempt_id = uuid.uuid4().hex
+        database.save_training_unscored_attempt({"attempt_id": attempt_id, "case_id": case_id, "user_id": user_id, "submitted_at": datetime.now(timezone.utc).isoformat(), "verdict": payload["verdict"], "report_text": payload["report_text"], "time_spent": payload["time_spent"], "coaching": coaching})
+        return jsonify(ok=True, attempt_id=attempt_id, status="unscored - no answer key", coaching=coaching), 201
 
     @app.post("/training/attempts")
     def submit_training_attempt():

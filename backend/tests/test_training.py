@@ -75,6 +75,38 @@ class TrainingApiTests(unittest.TestCase):
         self.assertEqual(response.get_json()["score_impact"], 0)
         self.assertEqual(len(response.get_json()["hints"]), 2)
 
+    def test_practice_mode_strips_visible_rule_mitre_without_changing_keys(self):
+        standard = self.client.get("/training/scenarios/ssh-brute-force", headers=HEADERS).get_json()["scenario"]
+        practice = self.client.get("/training/scenarios/ssh-brute-force?practice_mode=true", headers=HEADERS).get_json()["scenario"]
+        self.assertIn("mitre", standard["alert"]["rule"])
+        self.assertNotIn("mitre", practice["alert"]["rule"])
+        self.assertIn("mitre", self.client.get("/training/scenarios/ssh-brute-force", headers=HEADERS).get_json()["scenario"]["alert"]["rule"])
+
+    def test_imported_alert_is_sanitized_separate_and_unscored(self):
+        import database
+        import training
+        with patch.object(training, "coach_training_report", return_value={"what_was_good": "Evidence cited", "what_was_missed": "Scope", "one_thing_to_practise": "State unknowns"}):
+            imported = self.client.post("/training/imported-cases", json={"alert": {"@timestamp": "2025-01-01T00:00:00Z", "rule": {"description": "test"}, "data": {"srcip": "8.8.8.8"}}}, headers=HEADERS)
+            self.assertEqual(imported.status_code, 201)
+            case = imported.get_json()["case"]
+            self.assertEqual(case["status"], "unscored - no answer key")
+            self.assertIn("[REDACTED_PUBLIC_IP]", json.dumps(case["alert"]))
+            response = self.client.post(f"/training/imported-cases/{case['id']}/attempts", json={"verdict": "benign", "report_text": COMPLETE_REPORT, "time_spent": 10}, headers=HEADERS)
+        self.assertEqual(response.status_code, 201)
+        self.assertNotIn("score", response.get_json())
+        self.assertEqual(len(database.get_training_unscored_attempts_for_user("local-analyst")), 1)
+
+    def test_progress_emits_mistake_log_and_exportable_reports(self):
+        import database
+        self.submit(verdict="benign", escalate=False, mitre_ids=["bad"])
+        with closing(database.get_connection()) as connection, connection:
+            connection.execute("UPDATE training_attempts SET submitted_at = ?", ("2020-01-01T00:00:00+00:00",))
+        progress = self.client.get("/training/progress", headers=HEADERS).get_json()["progress"]
+        self.assertIn("under_escalation", {item["mistake"] for item in progress["common_mistakes"]})
+        self.assertTrue(any(item["type"] == "wrong_verdict" and item["category"] == "authentication" for item in progress["mistake_log"]))
+        self.assertIn("ssh-brute-force", progress["review_scenario_ids"])
+        self.assertEqual(progress["attempts"][0]["report_text"], COMPLETE_REPORT)
+
     def test_all_correct_submission_scores_and_reveals_feedback(self):
         response = self.submit()
         self.assertEqual(response.status_code, 201)

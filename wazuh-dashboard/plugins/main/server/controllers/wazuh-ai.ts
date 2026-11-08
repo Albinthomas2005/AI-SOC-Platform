@@ -184,6 +184,37 @@ function getErrorStatusCode(error: unknown): unknown {
 }
 
 export class WazuhAiCtrl {
+  async importTrainingAlert(context: RequestHandlerContext, request: OpenSearchDashboardsRequest, response: OpenSearchDashboardsResponseFactory) {
+    let username: string;
+    try {
+      const currentUser = await context.wazuh.security.getCurrentUser(request, context);
+      if (!currentUser || typeof currentUser.username !== 'string') throw new Error('unauthenticated');
+      username = currentUser.username;
+    } catch {
+      return response.custom({ statusCode: 401, body: { ok: false, error: 'Authentication required' } });
+    }
+    const body = (request.body || {}) as { index?: unknown; id?: unknown };
+    if (typeof body.index !== 'string' || typeof body.id !== 'string' || !body.id || Buffer.byteLength(body.id, 'utf8') > 512) {
+      return response.custom({ statusCode: 400, body: { ok: false, error: 'A valid alert reference is required' } });
+    }
+    let pattern: unknown;
+    try { pattern = await context.wazuh_core.configuration.getSettingValue('pattern'); }
+    catch { return response.custom({ statusCode: 503, body: { ok: false, error: 'Training service is unavailable' } }); }
+    if (!matchesAlertIndexPattern(body.index, pattern)) return response.custom({ statusCode: 400, body: { ok: false, error: 'A valid alert reference is required' } });
+    const token = process.env.SOC_AI_INTERNAL_TOKEN;
+    if (!token) return response.custom({ statusCode: 503, body: { ok: false, error: 'Training service is unavailable' } });
+    try {
+      const result = await context.core.opensearch.client.asCurrentUser.search({ index: body.index, body: { size: 1, track_total_hits: false, query: { ids: { values: [body.id] } }, _source: ALLOWED_ALERT_FIELDS } });
+      const source = result?.body?.hits?.hits?.[0]?._source;
+      if (!source) return response.custom({ statusCode: 404, body: { ok: false, error: 'Alert is unavailable' } });
+      const upstream = await needle('post', `${TRAINING_SERVICE_URL}/imported-cases`, { alert: minimizeAlert(source), user_id: username }, { json: true, headers: { Authorization: `Bearer ${token}` }, open_timeout: AI_SERVICE_TIMEOUT_MS, response_timeout: AI_SERVICE_TIMEOUT_MS });
+      return response.custom({ statusCode: upstream.statusCode || 502, body: upstream.body });
+    } catch (error) {
+      if (getErrorStatusCode(error) === 403) return response.custom({ statusCode: 403, body: { ok: false, error: 'Access to this alert is denied' } });
+      return response.custom({ statusCode: 503, body: { ok: false, error: 'Training service is unavailable' } });
+    }
+  }
+
   async proxyTraining(
     context: RequestHandlerContext,
     request: OpenSearchDashboardsRequest,

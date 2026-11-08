@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   EuiBadge,
+  EuiAccordion,
   EuiButton,
   EuiCallOut,
   EuiCodeBlock,
@@ -63,16 +64,21 @@ export const TrainingPage: React.FC = () => {
   const [handoverNote, setHandoverNote] = useState('');
   const [handoverCoaching, setHandoverCoaching] = useState<any>();
   const [handoverLoading, setHandoverLoading] = useState(false);
+  const [practiceMode, setPracticeMode] = useState(false);
+  const [alertIndex, setAlertIndex] = useState('');
+  const [alertId, setAlertId] = useState('');
+  const [importedCase, setImportedCase] = useState<any>();
   const finishingShift = useRef(false);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    WzRequest.genericReq('GET', '/api/training/scenarios', undefined, { shouldRetry: false, checkCurrentApiIsUp: false })
+    WzRequest.genericReq('GET', `/api/training/scenarios?practice_mode=${practiceMode}`, undefined, { shouldRetry: false, checkCurrentApiIsUp: false })
       .then((response: any) => {
         if (!active) return;
         if (response?.data?.ok && Array.isArray(response.data.scenarios)) {
           setScenarios(response.data.scenarios);
+          setSelected(current => current ? response.data.scenarios.find((item: Scenario) => item.id === current.id) || current : current);
           setError(false);
         } else {
           setError(true);
@@ -85,7 +91,7 @@ export const TrainingPage: React.FC = () => {
         }
       });
     return () => { active = false; };
-  }, []);
+  }, [practiceMode]);
 
   useEffect(() => {
     let active = true;
@@ -149,6 +155,7 @@ export const TrainingPage: React.FC = () => {
     setEscalate(true);
     setMitreIds([]);
     setReport('');
+    setImportedCase(undefined);
     setStartedAt(Date.now());
   };
 
@@ -233,6 +240,33 @@ export const TrainingPage: React.FC = () => {
     } catch { setError(true); }
   };
 
+  const importAlert = async () => {
+    setError(false);
+    try {
+      const response: any = await WzRequest.genericReq('POST', '/api/training/import-alert', { index: alertIndex, id: alertId }, { shouldRetry: false, checkCurrentApiIsUp: false });
+      if (!response?.data?.ok) throw new Error('Import failed');
+      const item = { id: response.data.case.id, title: 'Imported Wazuh alert', category: 'imported', difficulty: 1, status: response.data.case.status, alert: response.data.case.alert, evidence: { log_lines: [], context_notes: ['Real alert minimized through the signed-in analyst session.'] }, imported: true };
+      setScenarios(current => [item, ...current.filter(value => value.id !== item.id)]);
+      setSelected(item); setImportedCase(item); setResult(undefined); setCoaching(undefined); setReport(''); setStartedAt(Date.now());
+    } catch { setError(true); }
+  };
+
+  const submitImported = async () => {
+    if (!importedCase) return;
+    try {
+      const response: any = await WzRequest.genericReq('POST', `/api/training/imported-cases/${encodeURIComponent(importedCase.id)}/attempts`, { verdict, report_text: report, time_spent: Math.max(0, Math.floor((Date.now() - startedAt) / 1000)) }, { shouldRetry: false, checkCurrentApiIsUp: false });
+      if (!response?.data?.ok) throw new Error('Submission failed');
+      setResult(response.data); setCoaching(response.data.coaching);
+    } catch { setError(true); }
+  };
+
+  const exportMarkdown = () => {
+    const attempts = [...(progress?.attempts || []), ...(progress?.unscored_attempts || [])];
+    const markdown = ['# SOC Training Practice Export', '', ...attempts.map((item: any) => `## ${item.title || 'Imported alert'} · ${item.submitted_at}\n\nStatus: ${item.status || `${item.score}/100`}\n\nVerdict: ${item.verdict}\n\nTime: ${item.time_spent}s\n\n${item.report_text || '_No report text recorded._'}`)].join('\n\n');
+    const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown' }));
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'soc-training-practice.md'; anchor.click(); URL.revokeObjectURL(url);
+  };
+
   return (
     <EuiPage paddingSize='l'><EuiPageBody><EuiPageContent paddingSize='l'>
       <EuiTitle size='l'><h1>Analyst Training</h1></EuiTitle>
@@ -255,17 +289,25 @@ export const TrainingPage: React.FC = () => {
         <EuiFlexItem grow={1}>
           <EuiPanel>
             <EuiTitle size='s'><h2>Scenario queue</h2></EuiTitle>
+            <EuiSwitch label='Hide MITRE rule tags (practice mode)' checked={practiceMode} onChange={event => setPracticeMode(event.target.checked)} />
             <EuiFormRow label='Difficulty'><EuiSelect disabled={!!shift} value={difficulty} options={[{ value: 'all', text: 'All difficulties' }, ...[1, 2, 3, 4].map(n => ({ value: String(n), text: `Difficulty ${n}` }))]} onChange={event => setDifficulty(event.target.value)} /></EuiFormRow>
             <EuiFormRow label='Category'><EuiSelect disabled={!!shift} value={category} options={[{ value: 'all', text: 'All categories' }, ...categories.map(value => ({ value, text: value.replace(/_/g, ' ') }))]} onChange={event => setCategory(event.target.value)} /></EuiFormRow>
             <ul aria-label='Training scenarios'>{!loading && visible.map(s => <li key={s.id}>
               <EuiButton size='s' fill={selected?.id === s.id} isDisabled={!!shift} onClick={() => selectScenario(s)}>{s.title}</EuiButton>{' '}
               <EuiBadge>Level {s.difficulty}</EuiBadge>{' '}{completed.includes(s.id) && <EuiBadge color='success'>Completed</EuiBadge>}{' '}{s.status.includes('draft') && <EuiBadge color='warning'>Draft · needs review</EuiBadge>}
+              {progress?.review_scenario_ids?.includes(s.id) && <EuiBadge color='warning'>Review</EuiBadge>}
             </li>)}</ul>
+            <EuiTitle size='xs'><h4>Import a real Wazuh alert</h4></EuiTitle>
+            <EuiFormRow label='Alert index'><EuiFieldText value={alertIndex} onChange={event => setAlertIndex(event.target.value)} placeholder='Configured Wazuh alert index' /></EuiFormRow>
+            <EuiFormRow label='Alert ID'><EuiFieldText value={alertId} onChange={event => setAlertId(event.target.value)} /></EuiFormRow>
+            <EuiButton onClick={() => void importAlert()} isDisabled={!alertId.trim()}>Import alert for unscored practice</EuiButton>
             <EuiSpacer size='m' />
             <EuiTitle size='s'><h3>Your progress</h3></EuiTitle>
             <EuiText size='s'><p>Attempts: {progress?.attempt_count ?? 0} · Verdict accuracy: {progress?.verdict_accuracy === null || progress?.verdict_accuracy === undefined ? '—' : `${Math.round(progress.verdict_accuracy * 100)}%`} · Average time: {progress?.time_per_case?.average_seconds === null || progress?.time_per_case?.average_seconds === undefined ? '—' : `${Math.round(progress.time_per_case.average_seconds)} sec`}</p></EuiText>
             {progress?.per_category_accuracy && Object.entries(progress.per_category_accuracy).map(([name, stats]: [string, any]) => <EuiText size='s' key={name}><p>{name.replace(/_/g, ' ')}: {stats.accuracy === null ? 'not graded' : `${Math.round(stats.accuracy * 100)}%`} ({stats.attempts} attempts)</p></EuiText>)}
             {!!progress?.common_mistakes?.length && <EuiText size='s'><p>Common mistakes: {progress.common_mistakes.map((item: any) => `${item.mistake.replace(/_/g, ' ')} (${item.count})`).join(', ')}</p></EuiText>}
+            {!!progress?.mistake_log?.length && <><EuiTitle size='xs'><h4>Mistake log</h4></EuiTitle><ul>{progress.mistake_log.filter((item: any) => item.count > 0).map((item: any, index: number) => <li key={`${item.type}-${item.category || index}`}>{item.type.replace(/_/g, ' ')}{item.category ? ` · ${item.category.replace(/_/g, ' ')}` : ''} ({item.count}): {item.hint}</li>)}</ul></>}
+            <EuiButton size='s' onClick={exportMarkdown}>Export reports and attempt history as Markdown</EuiButton>
             {!!progress?.attempts?.length && <><EuiTitle size='xs'><h4>Attempt history</h4></EuiTitle><ul>{progress.attempts.slice(0, 8).map((attempt: any) => <li key={attempt.attempt_id}>{attempt.title} · {attempt.score}/100 · {attempt.time_spent}s</li>)}</ul></>}
           </EuiPanel>
         </EuiFlexItem>
@@ -281,21 +323,24 @@ export const TrainingPage: React.FC = () => {
               {selected.evidence.log_lines.map((line, index) => <EuiText key={index}><p>{line}</p></EuiText>)}
               <EuiTitle size='s'><h3>Context notes</h3></EuiTitle>
               {selected.evidence.context_notes.map((note, index) => <EuiText key={index}><p>{note}</p></EuiText>)}
+              <EuiAccordion id='training-triage-checklist' buttonContent='Triage checklist' paddingSize='m'><ol><li>What happened?</li><li>Who and where was involved?</li><li>When did it happen?</li><li>Was the activity expected?</li><li>What is the scope?</li><li>What is your verdict?</li><li>Should it be escalated?</li><li>What did you document?</li></ol></EuiAccordion>
               {!shift && <><EuiButton onClick={() => void requestHint()} isDisabled={hintLevel >= 3}>Hint (free) {hintLevel}/3</EuiButton>
               {hints.map((hint, index) => <EuiText key={index}><p>Hint {index + 1}: {hint}</p></EuiText>)}</>}
             </EuiPanel>
             {!result && <EuiPanel>
               <EuiTitle size='m'><h2>Your assessment</h2></EuiTitle>
               <EuiFormRow label='Verdict'><EuiSelect value={verdict} options={[{ value: 'true_positive', text: 'True positive' }, { value: 'false_positive', text: 'False positive' }, { value: 'benign', text: 'Benign' }]} onChange={event => setVerdict(event.target.value)} /></EuiFormRow>
-              <EuiSwitch label='Escalate this alert' checked={escalate} onChange={event => setEscalate(event.target.checked)} />
-              <EuiFormRow label='Search MITRE techniques'><EuiFieldSearch value={techniqueSearch} onChange={event => setTechniqueSearch(event.target.value)} placeholder='Search technique ID or name' /></EuiFormRow>
-              {techniques.slice(0, 10).map(technique => <EuiButton key={technique.id} size='s' onClick={() => setMitreIds(ids => ids.includes(technique.id) ? ids : [...ids, technique.id])}>{technique.id} · {technique.name}</EuiButton>)}
-              <EuiFormRow label='Add a technique ID if the local catalog is unavailable'><EuiFlexGroup gutterSize='s'><EuiFlexItem><EuiFieldText value={manualTechnique} onChange={event => setManualTechnique(event.target.value)} placeholder='T1110.001' /></EuiFlexItem><EuiFlexItem grow={false}><EuiButton onClick={() => { if (manualTechnique.trim()) setMitreIds(ids => ids.includes(manualTechnique.trim()) ? ids : [...ids, manualTechnique.trim()]); setManualTechnique(''); }}>Add ID</EuiButton></EuiFlexItem></EuiFlexGroup></EuiFormRow>
-              <EuiText size='s'><p>Selected: {mitreIds.join(', ') || 'None'}</p></EuiText>
+              {!importedCase && <EuiSwitch label='Escalate this alert' checked={escalate} onChange={event => setEscalate(event.target.checked)} />}
+              {importedCase && <EuiCallOut title='unscored - no answer key'><p>This imported alert receives report coaching only.</p></EuiCallOut>}
+              {!importedCase && <EuiFormRow label='Search MITRE techniques'><EuiFieldSearch value={techniqueSearch} onChange={event => setTechniqueSearch(event.target.value)} placeholder='Search technique ID or name' /></EuiFormRow>}
+              {!importedCase && techniques.slice(0, 10).map(technique => <EuiButton key={technique.id} size='s' onClick={() => setMitreIds(ids => ids.includes(technique.id) ? ids : [...ids, technique.id])}>{technique.id} · {technique.name}</EuiButton>)}
+              {!importedCase && <><EuiFormRow label='Add a technique ID if the local catalog is unavailable'><EuiFlexGroup gutterSize='s'><EuiFlexItem><EuiFieldText value={manualTechnique} onChange={event => setManualTechnique(event.target.value)} placeholder='T1110.001' /></EuiFlexItem><EuiFlexItem grow={false}><EuiButton onClick={() => { if (manualTechnique.trim()) setMitreIds(ids => ids.includes(manualTechnique.trim()) ? ids : [...ids, manualTechnique.trim()]); setManualTechnique(''); }}>Add ID</EuiButton></EuiFlexItem></EuiFlexGroup></EuiFormRow>
+              <EuiText size='s'><p>Selected: {mitreIds.join(', ') || 'None'}</p></EuiText></>}
               <EuiFormRow label='Short investigation report'><EuiTextArea value={report} onChange={event => setReport(event.target.value)} rows={8} placeholder={'Summary:\nEvidence:\nActions taken:\nUnknowns / not yet verified:'} /></EuiFormRow>
-              <EuiButton fill onClick={() => void (shift ? recordShiftResponse() : submitAttempt())}>{shift ? (shiftIndex === 7 ? 'Record and score shift' : 'Record decision and continue') : 'Submit assessment'}</EuiButton>
+              <EuiButton fill onClick={() => void (importedCase ? submitImported() : shift ? recordShiftResponse() : submitAttempt())}>{importedCase ? 'Submit unscored report for coaching' : shift ? (shiftIndex === 7 ? 'Record and score shift' : 'Record decision and continue') : 'Submit assessment'}</EuiButton>
             </EuiPanel>}
             {result && <EuiPanel>
+              {importedCase ? <><EuiTitle size='m'><h2>unscored - no answer key</h2></EuiTitle><EuiText><p>Your verdict was recorded without a correctness score. {coaching?.what_was_good}</p><p>Missed: {coaching?.what_was_missed}</p><p>Practise: {coaching?.one_thing_to_practise}</p></EuiText><EuiButton onClick={() => { setImportedCase(undefined); setSelected(undefined); setResult(undefined); }}>Next scenario</EuiButton></> : <>
               <EuiTitle size='m'><h2>Your score: {result.score.total}/{result.score.maximum}</h2></EuiTitle>
               {result.answer_status === 'draft - needs analyst review' && <EuiCallOut color='warning' title='This scenario answer key is a draft and needs analyst review.' />}
               <EuiText><p>Verdict: {result.score.verdict.points}/40 · Escalation: {result.score.escalation.points}/20 · MITRE: {result.score.mitre.points}/20 · Report: {result.score.report.points}/20</p></EuiText>
@@ -312,7 +357,7 @@ export const TrainingPage: React.FC = () => {
               {coaching && <EuiText><p><strong>Good:</strong> {coaching.what_was_good}</p><p><strong>Missed:</strong> {coaching.what_was_missed}</p><p><strong>Practise:</strong> {coaching.one_thing_to_practise}</p></EuiText>}
               {!coachingLoading && !coaching && <EuiText><p>AI coaching is unavailable right now.</p></EuiText>}
               <EuiButton fill onClick={() => { const next = visible.find(item => item.id !== selected.id && !completed.includes(item.id)); if (next) selectScenario(next); else { setSelected(undefined); setResult(undefined); } }}>Next scenario</EuiButton>
-            </EuiPanel>}
+            </>}</EuiPanel>}
           </>}
         </EuiFlexItem>
       </EuiFlexGroup>
