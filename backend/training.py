@@ -79,6 +79,15 @@ def _grade(submission, key):
     report_points = 20 if report_complete else 0
     applicable = [p for p in (verdict_points, escalation_points, mitre_points) if p is not None]
     score = min(100, sum(applicable) + report_points)
+    mistakes = []
+    if verdict_correct is False:
+        mistakes.append("verdict_mismatch")
+    if escalation_correct is False:
+        mistakes.append("over_escalation" if submission["escalate"] else "under_escalation")
+    if mitre_correct is False:
+        mistakes.append("mitre_selection_mismatch")
+    if not report_complete:
+        mistakes.append("incomplete_report")
     return {
         "total": score,
         "maximum": 100,
@@ -87,6 +96,7 @@ def _grade(submission, key):
         "mitre": {"points": mitre_points, "maximum": 20, "correct": mitre_correct, "accepted": [] if ambiguity else key["accepted_mitre_ids"], "valid": valid_ids, "invalid": invalid_ids, "unverified": unverified_ids},
         "report": {"points": report_points, "maximum": 20, "complete": report_complete, "sections": sections},
         "answer_status": key.get("answer_status", "provisional"),
+        "mistakes": mistakes,
     }
 
 
@@ -144,6 +154,59 @@ def register_training_routes(app, has_valid_token):
         techniques = [{"id": tid, "name": name} for tid, name in catalog.items()
                       if not query or query in tid.casefold() or query in name.casefold()]
         return jsonify(ok=True, verified=True, techniques=techniques[:50])
+
+    @app.get("/training/progress")
+    def get_training_progress():
+        denied = authorized()
+        if denied:
+            return denied
+        user_id = request.args.get("user_id", "local-analyst")[:200]
+        scenarios = {scenario["id"]: scenario for scenario in _visible_scenarios()}
+        rows = database.get_training_attempts_for_user(user_id)
+        category_stats = {}
+        mistakes = {}
+        verdict_correct = verdict_graded = 0
+        durations = []
+        history = []
+        for row in rows:
+            score = json.loads(row["score_json"])
+            scenario = scenarios.get(row["scenario_id"], {})
+            category = scenario.get("category", "unknown")
+            stats = category_stats.setdefault(category, {"attempts": 0, "verdict_correct": 0, "verdict_graded": 0})
+            stats["attempts"] += 1
+            correct = score.get("verdict", {}).get("correct")
+            if correct is not None:
+                stats["verdict_graded"] += 1
+                verdict_graded += 1
+                if correct:
+                    stats["verdict_correct"] += 1
+                    verdict_correct += 1
+            for mistake in score.get("mistakes", []):
+                mistakes[mistake] = mistakes.get(mistake, 0) + 1
+            durations.append(row["time_spent"])
+            history.append({
+                "attempt_id": row["attempt_id"], "scenario_id": row["scenario_id"],
+                "title": scenario.get("title", row["scenario_id"]), "category": category,
+                "submitted_at": row["submitted_at"], "verdict": row["verdict"],
+                "escalate": bool(row["escalate"]), "score": score.get("total", 0),
+                "time_spent": row["time_spent"],
+            })
+        for stats in category_stats.values():
+            stats["accuracy"] = stats["verdict_correct"] / stats["verdict_graded"] if stats["verdict_graded"] else None
+        return jsonify(ok=True, progress={
+            "attempt_count": len(rows),
+            "per_category_accuracy": category_stats,
+            "verdict_accuracy": verdict_correct / verdict_graded if verdict_graded else None,
+            "verdict_correct": verdict_correct,
+            "verdict_graded": verdict_graded,
+            "common_mistakes": sorted(
+                ({"mistake": name, "count": count} for name, count in mistakes.items()),
+                key=lambda item: (-item["count"], item["mistake"]),
+            ),
+            "time_per_case": {"average_seconds": sum(durations) / len(durations) if durations else None,
+                              "attempts_with_time": len(durations)},
+            "attempts": history,
+        })
 
     @app.post("/training/attempts")
     def submit_training_attempt():

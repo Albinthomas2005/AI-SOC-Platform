@@ -204,9 +204,10 @@ export class WazuhAiCtrl {
       return response.custom({ statusCode: 503, body: { ok: false, error: 'Training service is unavailable' } });
     }
     let target = `${TRAINING_SERVICE_URL}${path}`;
-    if (method === 'get' && request.query && Object.keys(request.query).length) {
-      const query = new URLSearchParams(request.query as Record<string, string>).toString();
-      target += `?${query}`;
+    if (method === 'get') {
+      const query = new URLSearchParams(request.query as Record<string, string> || {});
+      query.set('user_id', username);
+      target += `?${query.toString()}`;
     }
     const body = method === 'post' ? { ...(request.body || {}), user_id: username } : {};
     try {

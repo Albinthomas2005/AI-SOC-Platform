@@ -170,6 +170,31 @@ class TrainingApiTests(unittest.TestCase):
             with self.assertRaises(InvalidAIResponse):
                 assess_training_scenario(visible_scenario)
 
+    def test_sixteen_new_scenarios_are_drafts_with_synthetic_only_evidence(self):
+        from training import _visible_scenarios
+        drafts = [item for item in _visible_scenarios() if item["status"] == "draft - needs analyst review"]
+        self.assertEqual(len(drafts), 16)
+        for scenario in drafts:
+            self.assertNotIn("answer_key", scenario)
+            serialized = json.dumps(scenario)
+            for address in ("192.0.2.", "198.51.100.", "203.0.113."):
+                if address in serialized:
+                    break
+            else:
+                self.fail("draft scenario lacks a documentation-range IP")
+            self.assertIn("example.com", serialized)
+            self.assertNotIn("mitre", scenario["alert"]["rule"])
+
+    def test_progress_uses_only_the_signed_in_users_stored_attempts(self):
+        self.submit(user_id="analyst-a")
+        self.submit(user_id="analyst-b", verdict="benign", escalate=False)
+        response = self.client.get("/training/progress?user_id=analyst-a", headers=HEADERS)
+        progress = response.get_json()["progress"]
+        self.assertEqual(progress["attempt_count"], 1)
+        self.assertEqual(progress["verdict_accuracy"], 1.0)
+        self.assertEqual(progress["attempts"][0]["time_spent"], 90)
+        self.assertEqual(progress["time_per_case"]["average_seconds"], 90)
+
 
 if __name__ == "__main__":
     unittest.main()

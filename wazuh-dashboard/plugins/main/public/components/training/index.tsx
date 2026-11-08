@@ -39,6 +39,7 @@ export const TrainingPage: React.FC = () => {
   const [difficulty, setDifficulty] = useState('all');
   const [category, setCategory] = useState('all');
   const [completed, setCompleted] = useState<string[]>([]);
+  const [progress, setProgress] = useState<any>();
   const [hintLevel, setHintLevel] = useState(0);
   const [hints, setHints] = useState<string[]>([]);
   const [verdict, setVerdict] = useState('true_positive');
@@ -61,6 +62,18 @@ export const TrainingPage: React.FC = () => {
         if (active && response?.data?.ok && Array.isArray(response.data.scenarios)) setScenarios(response.data.scenarios);
         else if (active) setError(true);
       }).catch(() => active && setError(true));
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    WzRequest.genericReq('GET', '/api/training/progress', undefined, { shouldRetry: false, checkCurrentApiIsUp: false })
+      .then((response: any) => {
+        if (!active || !response?.data?.ok) return;
+        const summary = response.data.progress;
+        setProgress(summary);
+        setCompleted((summary.attempts || []).map((attempt: any) => attempt.scenario_id));
+      }).catch(() => {});
     return () => { active = false; };
   }, []);
 
@@ -140,8 +153,14 @@ export const TrainingPage: React.FC = () => {
             <EuiFormRow label='Category'><EuiSelect value={category} options={[{ value: 'all', text: 'All categories' }, ...categories.map(value => ({ value, text: value.replace(/_/g, ' ') }))]} onChange={event => setCategory(event.target.value)} /></EuiFormRow>
             <ul aria-label='Training scenarios'>{visible.map(s => <li key={s.id}>
               <EuiButton size='s' fill={selected?.id === s.id} onClick={() => selectScenario(s)}>{s.title}</EuiButton>{' '}
-              <EuiBadge>Level {s.difficulty}</EuiBadge>{' '}{completed.includes(s.id) && <EuiBadge color='success'>Completed</EuiBadge>}
+              <EuiBadge>Level {s.difficulty}</EuiBadge>{' '}{completed.includes(s.id) && <EuiBadge color='success'>Completed</EuiBadge>}{' '}{s.status.includes('draft') && <EuiBadge color='warning'>Draft · needs review</EuiBadge>}
             </li>)}</ul>
+            <EuiSpacer size='m' />
+            <EuiTitle size='s'><h3>Your progress</h3></EuiTitle>
+            <EuiText size='s'><p>Attempts: {progress?.attempt_count ?? 0} · Verdict accuracy: {progress?.verdict_accuracy === null || progress?.verdict_accuracy === undefined ? '—' : `${Math.round(progress.verdict_accuracy * 100)}%`} · Average time: {progress?.time_per_case?.average_seconds === null || progress?.time_per_case?.average_seconds === undefined ? '—' : `${Math.round(progress.time_per_case.average_seconds)} sec`}</p></EuiText>
+            {progress?.per_category_accuracy && Object.entries(progress.per_category_accuracy).map(([name, stats]: [string, any]) => <EuiText size='s' key={name}><p>{name.replace(/_/g, ' ')}: {stats.accuracy === null ? 'not graded' : `${Math.round(stats.accuracy * 100)}%`} ({stats.attempts} attempts)</p></EuiText>)}
+            {!!progress?.common_mistakes?.length && <EuiText size='s'><p>Common mistakes: {progress.common_mistakes.map((item: any) => `${item.mistake.replace(/_/g, ' ')} (${item.count})`).join(', ')}</p></EuiText>}
+            {!!progress?.attempts?.length && <><EuiTitle size='xs'><h4>Attempt history</h4></EuiTitle><ul>{progress.attempts.slice(0, 8).map((attempt: any) => <li key={attempt.attempt_id}>{attempt.title} · {attempt.score}/100 · {attempt.time_spent}s</li>)}</ul></>}
           </EuiPanel>
         </EuiFlexItem>
         <EuiFlexItem grow={3}>

@@ -222,6 +222,16 @@ def get_training_ai_disagreements():
         ).fetchall()
 
 
+def get_training_attempts_for_user(user_id):
+    with closing(get_connection()) as connection, connection:
+        return connection.execute(
+            """SELECT attempt_id, scenario_id, submitted_at, verdict, escalate,
+                      time_spent, score_json
+               FROM training_attempts WHERE user_id = ? ORDER BY submitted_at DESC""",
+            (user_id,),
+        ).fetchall()
+
+
 if __name__ == "__main__":
     init_db()
     print(f"Database initialized: {DB_PATH}")

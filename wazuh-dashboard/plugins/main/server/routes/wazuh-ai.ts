@@ -93,6 +93,11 @@ export function WazuhAiRoutes(router: IRouter) {
       ctrl.proxyTraining(context, request, response, '/scenarios', 'get'),
   );
   router.get(
+    { path: '/api/training/progress', validate: false },
+    (context, request, response) =>
+      ctrl.proxyTraining(context, request, response, '/progress', 'get'),
+  );
+  router.get(
     {
       path: '/api/training/mitre',
       validate: { query: schema.object({ q: schema.maybe(schema.string()) }) },
