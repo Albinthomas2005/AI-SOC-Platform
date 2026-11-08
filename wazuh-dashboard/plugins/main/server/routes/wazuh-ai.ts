@@ -75,4 +75,55 @@ export function WazuhAiRoutes(router: IRouter) {
     (context, request, response) =>
       ctrl.recordAnalysisDecision(context, request, response),
   );
+
+  router.get(
+    { path: '/api/training/scenarios', validate: false },
+    (context, request, response) =>
+      ctrl.proxyTraining(context, request, response, '/scenarios', 'get'),
+  );
+  router.get(
+    {
+      path: '/api/training/mitre',
+      validate: { query: schema.object({ q: schema.maybe(schema.string()) }) },
+    },
+    (context, request, response) =>
+      ctrl.proxyTraining(context, request, response, '/mitre', 'get'),
+  );
+  router.get(
+    {
+      path: '/api/training/scenarios/{id}',
+      validate: { params: schema.object({ id: schema.string() }) },
+    },
+    (context, request, response) =>
+      ctrl.proxyTraining(context, request, response, `/scenarios/${encodeURIComponent(request.params.id)}`, 'get'),
+  );
+  router.get(
+    {
+      path: '/api/training/scenarios/{id}/hints',
+      validate: {
+        params: schema.object({ id: schema.string() }),
+        query: schema.object({ level: schema.string() }),
+      },
+    },
+    (context, request, response) =>
+      ctrl.proxyTraining(context, request, response, `/scenarios/${encodeURIComponent(request.params.id)}/hints`, 'get'),
+  );
+  router.post(
+    {
+      path: '/api/training/attempts',
+      validate: {
+        body: schema.object({
+          scenario_id: schema.string(),
+          verdict: schema.string(),
+          escalate: schema.boolean(),
+          mitre_ids: schema.arrayOf(schema.string()),
+          report_text: schema.string(),
+          time_spent: schema.number(),
+        }),
+      },
+      options: { body: { maxBytes: 256 * 1024 } },
+    },
+    (context, request, response) =>
+      ctrl.proxyTraining(context, request, response, '/attempts', 'post'),
+  );
 }

@@ -125,6 +125,20 @@ def register_training_routes(app, has_valid_token):
             return jsonify(ok=False, error="Hint level is out of range"), 400
         return jsonify(ok=True, level=level, hints=key["hints"][:level], score_impact=0)
 
+    @app.get("/training/mitre")
+    def search_training_mitre():
+        denied = authorized()
+        if denied:
+            return denied
+        query = request.args.get("q", "").strip().casefold()[:100]
+        try:
+            catalog = load_techniques(CATALOG_PATH)
+        except (OSError, ValueError, json.JSONDecodeError):
+            return jsonify(ok=True, verified=False, techniques=[])
+        techniques = [{"id": tid, "name": name} for tid, name in catalog.items()
+                      if not query or query in tid.casefold() or query in name.casefold()]
+        return jsonify(ok=True, verified=True, techniques=techniques[:50])
+
     @app.post("/training/attempts")
     def submit_training_attempt():
         denied = authorized()
