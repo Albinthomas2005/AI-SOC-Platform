@@ -168,20 +168,12 @@ as `12:34:56` are preserved.
 
 These rules cannot reliably identify every encoding, obfuscation, or malformed
 address. Bare integer or hexadecimal values without IP context, encodings nested
-more than five times, and custom encodings may pass through. Default mode does
-not mask hostnames, URLs, MAC addresses, usernames, file paths, or command
-output as a whole. Their contents may identify a system even when literal IPs
-are filtered. The report API allowlists alert fields, but descriptions and
-analyst notes can still contain identifying context.
-
-An opt-in stricter filter can mask common identifiers at the final provider
-boundary: set `SOC_AI_STRICT_PRIVACY` to exactly the lowercase string `true`
-in the backend environment. Other values, including `TRUE`, do not enable it. It masks
-common HTTP, FTP, SSH, WebSocket, and file URLs; fully qualified hostnames;
-colon-, hyphen-, and Cisco-style MAC addresses; explicitly labeled usernames or
-accounts; and absolute Unix or Windows path tokens without embedded whitespace.
-It can remove useful SOC evidence and does not classify or redact arbitrary
-command output or every identifier. The default remains off.
+more than five times, and custom encodings may pass through. The provider
+boundary also masks common URLs, fully qualified hostnames, MAC addresses,
+explicitly labeled usernames or accounts, and absolute Unix or Windows path
+tokens. Pattern filtering cannot guarantee that arbitrary command output or
+every identifier is removed. The report API allowlists alert fields, but
+descriptions and analyst notes can still contain identifying context.
 
 The Generate Report API sends only allowlisted alert fields and sanitized notes.
 Both API endpoints pass their provider-bound prompts through the

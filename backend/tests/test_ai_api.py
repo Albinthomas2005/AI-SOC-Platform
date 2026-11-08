@@ -786,17 +786,9 @@ class TestGenerateReportAPI(unittest.TestCase):
         from types import SimpleNamespace
         from groq_service import _generate
 
-        cases = (
-            ("true", True),
-            ("1", False),
-            ("yes", False),
-            ("on", False),
-            ("TRUE", False),
-            ("True", False),
-            ("false", False),
-            ("", False),
-            (None, False),
-        )
+        # Internal hostnames and user identifiers must never leave the
+        # service, even when an operator has not enabled an optional setting.
+        cases = (("true", True), ("false", True), ("", True), (None, True))
         for configured_value, strict_enabled in cases:
             with self.subTest(value=configured_value):
                 completion = SimpleNamespace(
@@ -817,7 +809,8 @@ class TestGenerateReportAPI(unittest.TestCase):
                         os.environ["SOC_AI_STRICT_PRIVACY"] = configured_value
                     with patch("groq_service.Groq", return_value=client):
                         _generate(
-                            "Host ws-23.corp.example user=alice; IP 192.168.4.8",
+                            "Host ws-23.corp.example hostname=server01 "
+                            "agent.name='node7' user=alice; IP 192.168.4.8",
                             system_prompt=(
                                 "URL https://srv.internal.local/a; IP 192.168.4.8"
                             ),
@@ -829,6 +822,8 @@ class TestGenerateReportAPI(unittest.TestCase):
                     self.assertIn("[NONPUBLIC_IP_", message["content"])
                 if strict_enabled:
                     self.assertIn("[REDACTED_HOST]", messages[1]["content"])
+                    self.assertNotIn("server01", messages[1]["content"])
+                    self.assertNotIn("node7", messages[1]["content"])
                     self.assertIn("[REDACTED_USER]", messages[1]["content"])
                     self.assertIn("[REDACTED_URL]", messages[0]["content"])
                 else:

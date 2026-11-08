@@ -80,6 +80,10 @@ HOSTNAME_RE = re.compile(
     r"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
     r"(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59})\b"
 )
+LABELED_HOST_RE = re.compile(
+    r"(?i)(?P<label>\b(?:host|hostname|agent\.name)\b\s*[:=]\s*[\"']?)"
+    r"(?P<value>[a-z0-9][a-z0-9._-]*)"
+)
 USERNAME_RE = re.compile(
     r"(?i)\b(user(?:name)?|account|login)(\s*[:=]\s*)[^\s,;]+"
 )
@@ -260,6 +264,9 @@ def _strict_sanitize_text(value):
     value = URL_RE.sub("[REDACTED_URL]", value)
     value = MAC_RE.sub("[REDACTED_MAC]", value)
     value = USERNAME_RE.sub(lambda m: m.group(1) + m.group(2) + "[REDACTED_USER]", value)
+    value = LABELED_HOST_RE.sub(
+        lambda match: match.group("label") + "[REDACTED_HOST]", value
+    )
     value = WINDOWS_PATH_RE.sub("[REDACTED_PATH]", value)
     value = UNIX_PATH_RE.sub("[REDACTED_PATH]", value)
     return HOSTNAME_RE.sub("[REDACTED_HOST]", value)

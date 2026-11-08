@@ -277,11 +277,11 @@ This host install has not yet been verified.
 
 ## Privacy and limitations
 
-The filter masks selected email, token, secret, and address patterns. Strict
-mode optionally masks common hostnames, URLs, MAC addresses, usernames, and
-paths. It does not prove anonymization; allowlisted descriptions and analyst
-notes can still contain identifying details and are sent to a third-party AI
-provider. Review data handling before using non-synthetic alerts.
+The provider boundary masks selected email, token, secret, address, hostname,
+URL, MAC, username, and path patterns. This does not prove anonymization;
+allowlisted descriptions and analyst notes can still contain identifying
+details and are sent to a third-party AI provider. Review data handling before
+using non-synthetic alerts.
 
 AI output may be wrong or incomplete. The local ATT&CK catalog checks whether
 technique IDs exist; it does not establish that an AI mapping fits the evidence.
