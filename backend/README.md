@@ -192,6 +192,18 @@ preserve within-analysis correlation, and surrounding context may still
 identify a host or person. Review sanitized output and avoid unnecessary
 sensitive details.
 
+## Deterministic correlation API
+
+`POST /api/correlations` requires the internal bearer token and accepts an
+`alerts` array. It groups alert pairs that share a host, user, or source IP
+within `SOC_AI_CORRELATION_WINDOW_MINUTES` (default 15; valid range 1-1440),
+then returns group timelines with timestamps, evidence alert IDs, rule IDs,
+and shared entities. Connected pairwise links form one group for a sequence
+such as SSH failures, success, and sudo. The provider receives only the
+grouped timeline and summarizes it; entity values are redacted before the
+provider call. If no groups are found, the endpoint returns a deterministic
+message without calling a provider.
+
 ## Security notes
 
 - Never commit API keys, passwords, private keys, databases, or real security logs.

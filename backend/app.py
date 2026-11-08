@@ -16,9 +16,11 @@ from flask import (
 
 from database import init_db, save_ai_analysis, set_ai_analysis_decision
 from training import register_training_routes
+from correlation import correlate_alerts
 from groq_service import (
     explain_alert,
     generate_investigation_report,
+    summarize_correlation,
     GroqUnavailable,
     InvalidAIResponse,
 )
@@ -73,6 +75,42 @@ def has_valid_internal_token():
 
 
 register_training_routes(app, has_valid_internal_token)
+
+
+@app.route("/api/correlations", methods=["POST"])
+def correlate_alerts_api():
+    if not has_valid_internal_token():
+        return jsonify(ok=False, error="Authentication required"), 401
+
+    if not request.is_json:
+        return jsonify(ok=False, error="A JSON alert list is required"), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {"alerts"}:
+        return jsonify(ok=False, error="Invalid correlation request"), 400
+
+    try:
+        result = correlate_alerts(payload["alerts"])
+    except ValueError as error:
+        return jsonify(ok=False, error=str(error)), 400
+
+    summary = "No correlated alert groups were found."
+    if result["groups"]:
+        try:
+            summary = summarize_correlation(result)
+        except GroqUnavailable:
+            return jsonify(
+                ok=False,
+                error="Correlation summary is temporarily unavailable",
+                correlation=result,
+            ), 503
+        except Exception:
+            return jsonify(
+                ok=False,
+                error="Correlation summary could not be completed",
+                correlation=result,
+            ), 500
+
+    return jsonify(ok=True, correlation=result, summary=summary)
 
 
 @app.route("/api/ai/analyze-alert", methods=["POST"])

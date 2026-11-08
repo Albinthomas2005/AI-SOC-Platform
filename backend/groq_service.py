@@ -6,7 +6,7 @@ from groq import Groq
 from ai_providers import GroqProvider, OllamaProvider
 from mitre_validation import CATALOG_PATH as MITRE_CATALOG_PATH
 from mitre_validation import validate_mitre_references
-from privacy_filter import new_privacy_context, sanitize_text
+from privacy_filter import new_privacy_context, sanitize_alert, sanitize_text
 
 
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
@@ -177,6 +177,56 @@ Selected Wazuh alert JSON:
         generated, catalog_path=MITRE_CATALOG_PATH
     )
     return validated
+
+
+def summarize_correlation(correlation_result):
+    """Summarize only a deterministic, already-grouped correlation result."""
+    safe_groups = []
+    for group in correlation_result.get("groups", []):
+        timeline = []
+        for event in group.get("timeline", []):
+            entities = event.get("entities", {})
+            safe_entities = {}
+            for kind, value in entities.items():
+                if kind == "source_ip":
+                    safe_entities[kind] = sanitize_alert(
+                        {"source_ip": value}
+                    )["source_ip"]
+                elif kind == "host":
+                    safe_entities[kind] = "[REDACTED_HOST]"
+                elif kind == "user":
+                    safe_entities[kind] = "[REDACTED_USER]"
+            timeline.append({
+                "timestamp": event.get("timestamp"),
+                "alert_id": event.get("alert_id"),
+                "rule_ids": event.get("rule_ids", []),
+                "description": sanitize_text(
+                    event.get("description", ""), new_privacy_context()
+                ),
+                "entities": safe_entities,
+            })
+        safe_groups.append({
+            "group_id": group.get("group_id"),
+            "alert_ids": group.get("alert_ids", []),
+            "shared_entity_types": sorted({
+                entity.get("type")
+                for entity in group.get("shared_entities", [])
+                if isinstance(entity, dict) and entity.get("type")
+            }),
+            "timeline": timeline,
+        })
+
+    safe_result = {
+        "window_minutes": correlation_result.get("window_minutes"),
+        "groups": safe_groups,
+    }
+    prompt = (
+        "Summarize the following deterministically grouped alert timeline for a SOC analyst. "
+        "Use only the supplied alert IDs, rule IDs, timestamps, descriptions, and shared "
+        "entity types. Do not infer that a group proves malicious activity. State unknowns.\n"
+        + json.dumps(safe_result, ensure_ascii=False)
+    )
+    return _generate(prompt).strip()
 
 
 def improve_report(report_text):
