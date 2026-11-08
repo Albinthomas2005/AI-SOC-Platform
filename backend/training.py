@@ -9,6 +9,12 @@ from flask import jsonify, request
 
 import database
 from mitre_validation import CATALOG_PATH, load_techniques, validate_technique_id
+from groq_service import (
+    GroqUnavailable,
+    InvalidAIResponse,
+    assess_training_scenario,
+    coach_training_report,
+)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "datasets" / "training"
 VISIBLE_PATH = DATA_DIR / "scenarios.json"
@@ -168,8 +174,32 @@ def register_training_routes(app, has_valid_token):
             stored_score[field].pop("expected", None)
         stored_score["mitre"].pop("accepted", None)
         stored_score.pop("answer_status", None)
+        ai_assessment = None
+        try:
+            # The AI sees visible evidence only; the answer key is not part of
+            # this function call or its prompt.
+            ai_assessment = assess_training_scenario(scenario)
+            try:
+                catalog = load_techniques(CATALOG_PATH)
+            except (OSError, ValueError, json.JSONDecodeError):
+                catalog = None
+            ai_assessment["mitre_validation"] = {
+                technique_id: validate_technique_id(technique_id, catalog)
+                for technique_id in ai_assessment["mitre_ids"]
+            }
+        except Exception:
+            # Deterministic scoring must remain available if AI is unavailable.
+            ai_assessment = None
         attempt_id = uuid.uuid4().hex
         submitted_at = datetime.now(timezone.utc).isoformat()
+        disagreements = []
+        if ai_assessment is not None and score["answer_status"] == "provisional":
+            for field in ("verdict", "escalate"):
+                expected = key[f"expected_{field}"]
+                if ai_assessment[field] != expected:
+                    disagreements.append((field, ai_assessment[field], expected))
+            if set(ai_assessment["mitre_ids"]) != set(key["accepted_mitre_ids"]):
+                disagreements.append(("mitre_ids", ai_assessment["mitre_ids"], key["accepted_mitre_ids"]))
         database.save_training_attempt({
             "attempt_id": attempt_id,
             "user_id": payload.get("user_id", "local-analyst"),
@@ -182,7 +212,48 @@ def register_training_routes(app, has_valid_token):
             "report_text": payload["report_text"],
             "time_spent": payload["time_spent"],
             "score": stored_score,
+            "ai_assessment": ai_assessment,
         })
+        database.save_training_disagreements(attempt_id, scenario_id, disagreements, submitted_at)
         return jsonify(ok=True, attempt_id=attempt_id, score=score,
                        feedback={"verdict": score["verdict"]["correct"], "escalation": score["escalation"]["correct"], "mitre": score["mitre"]["correct"], "report": score["report"]["sections"]},
-                       explanation=key["explanation"], answer_status=key.get("answer_status", "provisional")), 201
+                       explanation=key["explanation"], answer_status=key.get("answer_status", "provisional"),
+                       analyst={"verdict": payload["verdict"], "escalate": payload["escalate"], "mitre_ids": payload["mitre_ids"]},
+                       ai=ai_assessment,
+                       expected={"verdict": score["verdict"]["expected"], "escalate": score["escalation"]["expected"], "mitre_ids": score["mitre"]["accepted"]}), 201
+
+    @app.post("/training/attempts/<attempt_id>/coaching")
+    def coach_training_attempt(attempt_id):
+        denied = authorized()
+        if denied:
+            return denied
+        if not request.is_json or not isinstance(request.get_json(silent=True), dict):
+            return jsonify(ok=False, error="A JSON coaching request is required"), 400
+        attempt = database.get_training_attempt(attempt_id)
+        user_id = request.get_json().get("user_id", "local-analyst")
+        if attempt is None or attempt["user_id"] != user_id:
+            return jsonify(ok=False, error="Attempt not found"), 404
+        scenario = next((s for s in _visible_scenarios() if s["id"] == attempt["scenario_id"]), None)
+        key = next((k for k in _load(ANSWER_PATH) if k["id"] == attempt["scenario_id"]), None)
+        if scenario is None or key is None:
+            return jsonify(ok=False, error="Attempt not found"), 404
+        try:
+            coaching = coach_training_report(attempt["report_text"], scenario, key["explanation"])
+        except InvalidAIResponse as error:
+            return jsonify(ok=False, error=f"AI coaching response failed validation: {error}"), 502
+        except GroqUnavailable:
+            return jsonify(ok=False, error="AI coaching is temporarily unavailable"), 503
+        database.save_training_coaching(attempt_id, coaching)
+        return jsonify(ok=True, attempt_id=attempt_id, coaching=coaching)
+
+    @app.get("/training/ai-disagreements")
+    def training_ai_disagreements():
+        denied = authorized()
+        if denied:
+            return denied
+        rows = database.get_training_ai_disagreements()
+        return jsonify(ok=True, disagreements=[{
+            "attempt_id": row["attempt_id"], "scenario_id": row["scenario_id"],
+            "field": row["field"], "ai_value": json.loads(row["ai_value"]),
+            "expected_value": json.loads(row["expected_value"]), "created_at": row["created_at"],
+        } for row in rows])

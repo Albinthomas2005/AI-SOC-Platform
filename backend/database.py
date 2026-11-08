@@ -73,7 +73,28 @@ def init_db():
                 invalid_mitre_ids_json TEXT NOT NULL,
                 report_text TEXT NOT NULL,
                 time_spent INTEGER NOT NULL,
-                score_json TEXT NOT NULL
+                score_json TEXT NOT NULL,
+                ai_assessment_json TEXT,
+                coaching_json TEXT
+            )
+        """)
+        attempt_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(training_attempts)")
+        }
+        if "ai_assessment_json" not in attempt_columns:
+            connection.execute("ALTER TABLE training_attempts ADD COLUMN ai_assessment_json TEXT")
+        if "coaching_json" not in attempt_columns:
+            connection.execute("ALTER TABLE training_attempts ADD COLUMN coaching_json TEXT")
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS training_ai_disagreements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                attempt_id TEXT NOT NULL,
+                scenario_id TEXT NOT NULL,
+                field TEXT NOT NULL,
+                ai_value TEXT NOT NULL,
+                expected_value TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(attempt_id, field)
             )
         """)
 
@@ -154,14 +175,15 @@ def save_training_attempt(attempt):
             """INSERT INTO training_attempts
                 (attempt_id, user_id, scenario_id, submitted_at, verdict,
                  escalate, mitre_ids_json, invalid_mitre_ids_json, report_text,
-                 time_spent, score_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 time_spent, score_json, ai_assessment_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 attempt["attempt_id"], attempt["user_id"], attempt["scenario_id"],
                 attempt["submitted_at"], attempt["verdict"],
                 int(attempt["escalate"]), json.dumps(attempt["mitre_ids"]),
                 json.dumps(attempt["invalid_mitre_ids"]), attempt["report_text"],
                 attempt["time_spent"], json.dumps(attempt["score"]),
+                json.dumps(attempt.get("ai_assessment")) if attempt.get("ai_assessment") is not None else None,
             ),
         )
 
@@ -171,6 +193,33 @@ def get_training_attempt(attempt_id):
         return connection.execute(
             "SELECT * FROM training_attempts WHERE attempt_id = ?", (attempt_id,)
         ).fetchone()
+
+
+def save_training_coaching(attempt_id, coaching):
+    with closing(get_connection()) as connection, connection:
+        cursor = connection.execute(
+            "UPDATE training_attempts SET coaching_json = ? WHERE attempt_id = ?",
+            (json.dumps(coaching), attempt_id),
+        )
+        return cursor.rowcount == 1
+
+
+def save_training_disagreements(attempt_id, scenario_id, disagreements, created_at):
+    with closing(get_connection()) as connection, connection:
+        for field, ai_value, expected_value in disagreements:
+            connection.execute(
+                """INSERT OR IGNORE INTO training_ai_disagreements
+                   (attempt_id, scenario_id, field, ai_value, expected_value, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (attempt_id, scenario_id, field, json.dumps(ai_value), json.dumps(expected_value), created_at),
+            )
+
+
+def get_training_ai_disagreements():
+    with closing(get_connection()) as connection, connection:
+        return connection.execute(
+            "SELECT * FROM training_ai_disagreements ORDER BY id DESC"
+        ).fetchall()
 
 
 if __name__ == "__main__":
