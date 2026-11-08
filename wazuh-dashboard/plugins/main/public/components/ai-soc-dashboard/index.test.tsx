@@ -74,15 +74,18 @@ describe('AiSocDashboard', () => {
         status: 'ai_generated_unverified',
         decision: 'unreviewed',
         decision_label: 'AI draft - not reviewed',
-        report: '## Assessment\n\nSynthetic report draft',
+        report: '## Assessment\n\nSynthetic report draft\n<img src=x onerror=alert(1)>',
       },
     });
-    render(<AiSocDashboard />);
+    const { container } = render(<AiSocDashboard />);
     fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
     expect(
-      await screen.findByRole('heading', { level: 2, name: 'Assessment' }),
+      await screen.findByText((_, element) =>
+        element?.tagName === 'PRE' &&
+        element.textContent === '## Assessment\n\nSynthetic report draft\n<img src=x onerror=alert(1)>',
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByText('Synthetic report draft')).toBeInTheDocument();
+    expect(container.querySelector('img')).toBeNull();
     expect(
       screen.getByText('AI draft - not reviewed'),
     ).toBeInTheDocument();

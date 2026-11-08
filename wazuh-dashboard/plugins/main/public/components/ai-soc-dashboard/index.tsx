@@ -6,7 +6,6 @@ import {
   EuiEmptyPrompt,
   EuiFlexGroup,
   EuiFlexItem,
-  EuiMarkdownFormat,
   EuiLoadingSpinner,
   EuiPage,
   EuiPageBody,
@@ -346,7 +345,9 @@ export const AiSocDashboard: React.FC = () => {
                     onChange={event => setEditedText(event.target.value)}
                   />
                 ) : (
-                  <EuiMarkdownFormat>{report.text}</EuiMarkdownFormat>
+                  <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {report.text}
+                  </pre>
                 )}
                 <EuiSpacer size='s' />
                 <EuiTextArea
