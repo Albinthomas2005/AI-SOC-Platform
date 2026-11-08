@@ -92,8 +92,8 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
   scenarios. These are not production telemetry.
 - `datasets/training/`: analyst-visible scenarios and a separate server-only
   answer-key file.
-- `data/`: instructions and loader input location for a local Enterprise
-  ATT&CK catalog. No full catalog is bundled.
+- `data/`: generated local Enterprise ATT&CK catalog and build instructions;
+  the raw STIX source is kept locally under ignored `data/raw/`.
 - `docs/`: evaluation analysis, privacy explanation, and limitations.
 - `documentation/`: architecture, installation, systemd, and historical
   evaluation materials.
@@ -103,7 +103,7 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
 | Done | Pending |
 |---|---|
 | Training routes and client-side Markdown export are implemented; smoke checks were not run for this task. | Review the 16 draft answer keys with analysts. |
-| Backend suite: 109 tests passed for this task, using temporary databases and mocked providers. | Rerun the synthetic evaluation and review its results. |
+| Backend suite: 110 tests passed for this cherry-pick task, using temporary databases and mocked providers. | Rerun the synthetic evaluation and review its results. |
 | Backend runner and training endpoint smoke script are in place; the smoke script was not run for this task. | Capture real Training Mode screenshots under `docs/screenshots/`. |
 | `git diff --check` passed for this task. | Build and install the Dashboard plugin in its pinned environment; not run for this task. |
 
@@ -111,25 +111,63 @@ Live provider behavior and the Dashboard UI were not verified in this task.
 
 ## Training Mode
 
-Training Mode provides synthetic analyst exercises with deterministic server
+Training Mode provides a scenario queue, alert and evidence views, deterministic
 grading, free hints, report completeness feedback, and structured AI report
-coaching. The analyst's verdict and MITRE choices are shown alongside the AI
-assessment and expected result after submission. A separate progress view
-summarizes stored attempts. Timed shifts use eight mixed cases, a 20-minute
-timer, no hints, separate shift storage, and an AI-coached handover note.
+coaching. After submission, the analyst can compare their verdict and MITRE
+choices with the AI assessment and expected answer. Progress includes accuracy,
+common mistakes, review reminders, and exportable reports. Timed shifts use
+eight mixed cases, a 20-minute timer, no hints, separate shift storage, and an
+AI-coached handover note. The 16 new answer keys are **DRAFTS pending analyst
+review**; do not treat them as trusted ground truth until reviewed.
 
-| Training capability | Status |
-|---|---|
-| Backend scenario, grading, progress, disagreement, shift, and handover APIs | Implemented; backend unit tests use temporary SQLite databases and mocked providers |
-| Dashboard Training page and server proxy routes | Implemented; TypeScript tests written, not run because plugin dependencies are absent |
-| New scenarios | 16 synthetic drafts; each answer key needs review by the person using the tool before being trusted |
-| Legacy scenarios | 14 converted; 8 have ambiguous expected dispositions and are not graded on those fields |
-| Local ATT&CK validation | Unverified until a reviewed local catalog is installed |
-| Dashboard build and plugin tests | Not run in this workspace; use the pinned Wazuh Dashboard dependency environment |
+### Setup and run
+
+Follow [Local setup](#local-setup) to create and activate `backend/.venv`,
+install requirements, and configure the backend environment. The backend reads
+scenario data from `datasets/training/` and the local ATT&CK catalog from
+`data/mitre_techniques.json`. Start it from `backend/`:
+
+```bash
+source .venv/bin/activate
+python app.py
+```
+
+The Training page is part of the Wazuh Dashboard plugin at
+`wazuh-dashboard/plugins/main/`. With the pinned Dashboard dependencies
+installed, build from that directory:
+
+```bash
+OPENSEARCH_DASHBOARDS_VERSION=2.19.6 yarn build
+```
+
+### Tests
+
+Run the backend suite from the repository root with the backend virtual
+environment active. Tests use temporary SQLite databases and mocked AI
+providers; they do not require live alert data or a provider key:
+
+```bash
+source backend/.venv/bin/activate
+python -m unittest discover backend
+```
+
+The TypeScript and plugin build require the pinned Wazuh Dashboard dependency
+environment; see the plugin build instructions above.
+
+### Screenshots
+
+Screenshot placeholders (images are not included yet):
+
+- Scenario queue: `docs/screenshots/scenario-queue.png`
+- Evidence view: `docs/screenshots/evidence-view.png`
+- Score breakdown: `docs/screenshots/score-breakdown.png`
+- Analyst vs AI vs expected: `docs/screenshots/analyst-ai-expected.png`
+- Timed shift: `docs/screenshots/shift.png`
 
 See [Training Mode documentation](docs/TRAINING_MODE.md) for the scenario
-format, key separation, scoring rules, and limitations. Do not use draft answer
-keys as trusted ground truth before review.
+format, key separation, scoring rules, and limitations. See
+[`docs/ANSWER_KEY_REVIEW.md`](docs/ANSWER_KEY_REVIEW.md) for the generated
+review checklist covering all 16 draft keys.
 
 ## Local setup
 
@@ -232,10 +270,11 @@ paths. It does not prove anonymization; allowlisted descriptions and analyst
 notes can still contain identifying details and are sent to a third-party AI
 provider. Review data handling before using non-synthetic alerts.
 
-AI output may be wrong or incomplete. MITRE output remains unverified until a
-local catalog is supplied. A human must review output before using it. The
-project does not correlate arbitrary event histories, block hosts, disable
-accounts, execute remediation, or replace Wazuh access control.
+AI output may be wrong or incomplete. The local ATT&CK catalog checks whether
+technique IDs exist; it does not establish that an AI mapping fits the evidence.
+A human must review output before using it. The project does not correlate
+arbitrary event histories, block hosts, disable accounts, execute remediation,
+or replace Wazuh access control.
 
 Read [Privacy](docs/PRIVACY.md) and [Limitations](docs/LIMITATIONS.md) before
 connecting production data.
