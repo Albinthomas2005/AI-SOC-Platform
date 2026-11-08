@@ -1,8 +1,9 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { WzRequest } from '../../react-services/wz-request';
 import { TrainingPage } from './index';
+import { TrainingPageErrorBoundary } from './training-page-boundary';
 
 jest.mock('../../react-services/wz-request', () => ({
   WzRequest: { genericReq: jest.fn() },
@@ -44,6 +45,35 @@ describe('TrainingPage', () => {
       } });
       return Promise.resolve({ data: { ok: true } });
     });
+  });
+
+  it('renders the scenario list from a mocked request', async () => {
+    render(<TrainingPage />);
+    await screen.findByRole('button', { name: 'Synthetic SSH' });
+    const list = screen.getByRole('list', { name: 'Training scenarios' });
+    expect(within(list).getByRole('button', { name: 'Synthetic SSH' })).toBeInTheDocument();
+    expect(WzRequest.genericReq).toHaveBeenCalledWith(
+      'GET', '/api/training/scenarios', undefined,
+      { shouldRetry: false, checkCurrentApiIsUp: false },
+    );
+  });
+
+  it('shows a visible error when the scenario request fails', async () => {
+    (WzRequest.genericReq as jest.Mock).mockImplementation((method: string, path: string) =>
+      path === '/api/training/scenarios'
+        ? Promise.reject(new Error('synthetic fetch failure'))
+        : Promise.resolve({ data: { ok: true, progress: { attempts: [] }, techniques: [] } }),
+    );
+    render(<TrainingPage />);
+    expect(await screen.findByText('Training service is unavailable. Try again.')).toBeInTheDocument();
+  });
+
+  it('replaces a rendering crash with the boundary message', async () => {
+    const BrokenPage: React.FC = () => { throw new Error('synthetic render failure'); };
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    render(<TrainingPageErrorBoundary><BrokenPage /></TrainingPageErrorBoundary>);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Training could not be displayed');
+    error.mockRestore();
   });
 
   it('shows evidence and free hints for a selected queue item', async () => {

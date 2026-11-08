@@ -34,6 +34,7 @@ type Scenario = {
 type Technique = { id: string; name: string };
 
 export const TrainingPage: React.FC = () => {
+  const [loading, setLoading] = useState(true);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selected, setSelected] = useState<Scenario>();
   const [difficulty, setDifficulty] = useState('all');
@@ -66,11 +67,23 @@ export const TrainingPage: React.FC = () => {
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
     WzRequest.genericReq('GET', '/api/training/scenarios', undefined, { shouldRetry: false, checkCurrentApiIsUp: false })
       .then((response: any) => {
-        if (active && response?.data?.ok && Array.isArray(response.data.scenarios)) setScenarios(response.data.scenarios);
-        else if (active) setError(true);
-      }).catch(() => active && setError(true));
+        if (!active) return;
+        if (response?.data?.ok && Array.isArray(response.data.scenarios)) {
+          setScenarios(response.data.scenarios);
+          setError(false);
+        } else {
+          setError(true);
+        }
+        setLoading(false);
+      }).catch(() => {
+        if (active) {
+          setError(true);
+          setLoading(false);
+        }
+      });
     return () => { active = false; };
   }, []);
 
@@ -228,6 +241,8 @@ export const TrainingPage: React.FC = () => {
       {shift && <EuiCallOut title={`Shift in progress · ${Math.floor(shiftRemaining / 60)}:${String(shiftRemaining % 60).padStart(2, '0')} remaining`}><p>Case {shiftIndex + 1} of 8 · Hints are disabled during shifts.</p></EuiCallOut>}
       <EuiSpacer />
       {error && <EuiCallOut color='danger' title='Training service is unavailable. Try again.' />}
+      {loading && <EuiText role='status'><p>Loading training scenarios…</p></EuiText>}
+      {!loading && !error && scenarios.length === 0 && <EuiCallOut title='No training scenarios are available.' />}
       {shiftSummary && <EuiPanel>
         <EuiTitle size='m'><h2>Shift summary · {Math.round(shiftSummary.average_score)}% ({shiftSummary.total_points}/{shiftSummary.maximum_points})</h2></EuiTitle>
         <EuiText><p>Cases completed: {shiftSummary.completed_count}/8{shiftSummary.timed_out ? ' · Timer expired' : ''}</p></EuiText>
@@ -242,7 +257,7 @@ export const TrainingPage: React.FC = () => {
             <EuiTitle size='s'><h2>Scenario queue</h2></EuiTitle>
             <EuiFormRow label='Difficulty'><EuiSelect disabled={!!shift} value={difficulty} options={[{ value: 'all', text: 'All difficulties' }, ...[1, 2, 3, 4].map(n => ({ value: String(n), text: `Difficulty ${n}` }))]} onChange={event => setDifficulty(event.target.value)} /></EuiFormRow>
             <EuiFormRow label='Category'><EuiSelect disabled={!!shift} value={category} options={[{ value: 'all', text: 'All categories' }, ...categories.map(value => ({ value, text: value.replace(/_/g, ' ') }))]} onChange={event => setCategory(event.target.value)} /></EuiFormRow>
-            <ul aria-label='Training scenarios'>{visible.map(s => <li key={s.id}>
+            <ul aria-label='Training scenarios'>{!loading && visible.map(s => <li key={s.id}>
               <EuiButton size='s' fill={selected?.id === s.id} isDisabled={!!shift} onClick={() => selectScenario(s)}>{s.title}</EuiButton>{' '}
               <EuiBadge>Level {s.difficulty}</EuiBadge>{' '}{completed.includes(s.id) && <EuiBadge color='success'>Completed</EuiBadge>}{' '}{s.status.includes('draft') && <EuiBadge color='warning'>Draft · needs review</EuiBadge>}
             </li>)}</ul>
