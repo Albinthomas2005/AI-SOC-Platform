@@ -88,6 +88,7 @@ def extract_iocs(value):
             return " ".join(
                 safe_text(child, str(child_key))
                 for child_key, child in item.items()
+                if str(child_key).casefold() != "full_log"
             )
         if isinstance(item, (list, tuple)):
             return " ".join(safe_text(child, key) for child in item)

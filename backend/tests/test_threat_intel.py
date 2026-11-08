@@ -81,6 +81,13 @@ class ThreatIntelTests(unittest.TestCase):
         self.assertNotIn("bad-password", serialized)
         self.assertNotIn("192.168.1.4", serialized)
 
+    def test_alert_extraction_never_reads_full_log(self):
+        iocs = extract_iocs({
+            "rule": {"description": "Routine event"},
+            "full_log": "Unexpected request to https://raw-log-only.example.org/a",
+        })
+        self.assertEqual(iocs, [])
+
     def test_virustotal_and_abuseipdb_adapters_use_mocked_http(self):
         vt_open = Mock(return_value=FakeHttpResponse({"data": {"id": "8.8.8.8", "attributes": {"reputation": 4}}}))
         with patch("threat_intel.urlopen", vt_open):
