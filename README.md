@@ -9,18 +9,18 @@ automate containment or replace analyst judgment.
 
 ## Quick start
 
-1. Start the local backend from the repository root (requires
-   `backend/.venv` and its local configuration):
+1. Copy `backend/.env.example` to `backend/.env`, replace the secret
+   placeholders, then start the local backend from the repository root
+   (requires `backend/.venv`):
 
    ```bash
    ./scripts/run-backend.sh
    ```
 
-2. In another terminal, run the backend suite:
+2. From the repository root, run the backend suite (tests use temporary DBs):
 
    ```bash
-   source backend/.venv/bin/activate
-   python -m unittest discover backend
+   PYTHON_DOTENV_DISABLED=1 backend/.venv/bin/python -m unittest discover backend
    ```
 
 3. Set `SOC_AI_INTERNAL_TOKEN` in your shell from your protected local
@@ -42,6 +42,31 @@ automate containment or replace analyst judgment.
 
    The installer requires a successful artifact workflow run ID and access to
    the target Dashboard installation; see its usage before installing.
+
+## Merge preparation
+
+The repository `.gitignore` covers `.env`, database files, logs, backups, and
+`node_modules`. A local Git-history scan for common Groq, GitHub, AWS, and
+private-key signatures found no matches; this is a limited signature scan,
+not proof that every possible secret is absent. History was not rewritten.
+
+`backend/.env.example` lists the environment variables read by the backend
+and plugin server controllers. `scripts/run-backend.sh` forces a loopback
+host; set `SOC_AI_PORT` in the shell before starting it when using a non-default
+port. The smoke script reads `backend/.env` for its token.
+
+Wazuh app files changed on this branch include:
+
+- `public/app-router.tsx`, `public/plugin.ts`, `public/types.ts`, and `public/utils/applications.ts`.
+- `public/components/ai-soc-dashboard/{index.tsx,index.test.tsx,route.tsx,route.test.tsx}`.
+- `public/components/common/wazuh-discover/{wz-discover.tsx,components/ai-analysis-tab.tsx,components/ai-analysis-tab.test.tsx,components/ai-analysis-tabs.tsx,components/ai-analysis-tabs.test.tsx}`.
+- `public/components/overview/mitre/framework/components/techniques/components/flyout-technique/technique-row-details.tsx`.
+- `public/components/phase-workbench/{index.tsx,index.test.tsx}` and `public/components/discover-ai-analyst/{index.tsx,index.test.tsx}`.
+- `server/controllers/{index.ts,wazuh-ai.ts,wazuh-hunting.ts,wazuh-phase.ts}`.
+- `server/routes/{index.ts,wazuh-ai-report.test.ts,wazuh-hunting.ts,wazuh-hunting.test.ts,wazuh-phase.ts}`.
+
+The backend suite passed 171 tests in the latest run. Dashboard plugin Jest
+tests have not run; `yarn` is unavailable in this environment.
 
 ## Demo data
 
