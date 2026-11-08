@@ -1,7 +1,6 @@
 """Evidence-grounded assistant responses with role-filtered source loading."""
 
 import json
-import math
 from contextlib import closing
 
 from flask import jsonify, request
@@ -11,7 +10,6 @@ import groq_service
 from privacy_filter import (
     minimize_report_evidence,
     new_privacy_context,
-    sanitize_alert,
     sanitize_text,
 )
 from roles_audit import request_username, role_allowed
@@ -21,55 +19,15 @@ MAX_EVIDENCE_REFERENCES = 10
 MAX_QUESTION_CHARS = 2000
 NO_EVIDENCE_ANSWER = "I can't answer without accessible evidence."
 VALID_OBJECT_TYPES = {"alert", "report", "incident", "hunt"}
-INLINE_ALERT_FIELDS = (
-    "rule.id", "rule.description", "rule.level", "rule.groups",
-    "rule.mitre.id", "rule.mitre.tactic", "agent.name", "data.srcip",
-    "data.srcuser", "data.dstuser", "location",
-)
-
-
 def _safe_alert(value):
     if not isinstance(value, dict):
         return {}
-    minimized = minimize_report_evidence(value, new_privacy_context())
-    return sanitize_alert(minimized, privacy_context=new_privacy_context())
+    return minimize_report_evidence(value, privacy_context=new_privacy_context())
 
 
 def _safe_inline_alert(value):
     """Build evidence from only the Discover fields accepted by the UI contract."""
-    if not isinstance(value, dict):
-        return {}
-    minimized = {}
-    for path in INLINE_ALERT_FIELDS:
-        item = value
-        for part in path.split("."):
-            if not isinstance(item, dict) or part not in item:
-                item = None
-                break
-            item = item[part]
-        if isinstance(item, str):
-            item = item[:4096]
-            if not item.strip():
-                continue
-        elif isinstance(item, list):
-            item = [entry[:4096] if isinstance(entry, str) else entry
-                    for entry in item[:50]
-                    if isinstance(entry, (str, int, float, bool))]
-            if not item:
-                continue
-        elif (
-            not isinstance(item, (int, float, bool))
-            or isinstance(item, float) and not math.isfinite(item)
-        ):
-            continue
-        parts = path.split(".")
-        if path == "agent.name":
-            item = "[REDACTED_HOST]"
-        target = minimized
-        for part in parts[:-1]:
-            target = target.setdefault(part, {})
-        target[parts[-1]] = item
-    return sanitize_alert(minimized, privacy_context=new_privacy_context())
+    return minimize_report_evidence(value, privacy_context=new_privacy_context())
 
 
 def _load_alert(connection, object_id):

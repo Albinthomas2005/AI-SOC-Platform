@@ -92,26 +92,19 @@ UNIX_PATH_RE = re.compile(
 )
 WINDOWS_PATH_RE = re.compile(r"(?i)\b[A-Z]:\\(?:[^\\\s]+\\)*[^\\\s]+")
 
-REPORT_EVIDENCE_FIELDS = (
+AI_ALERT_FIELD_ALLOWLIST = (
     "@timestamp",
     "timestamp",
     "rule.id",
-    "rule.level",
     "rule.description",
+    "rule.level",
     "rule.groups",
-    "rule.mitre.id",
-    "rule.mitre.tactic",
-    "rule.mitre.technique",
-    "decoder.name",
-    "agent.id",
+    "rule.mitre.*",
+    "agent.name",
     "data.srcip",
-    "data.dstip",
-    "data.srcport",
-    "data.dstport",
-    "data.protocol",
-    "data.action",
-    "data.authentication_result",
-    "data.win.system.eventID",
+    "data.srcuser",
+    "data.dstuser",
+    "location",
 )
 
 
@@ -332,13 +325,15 @@ def sanitize_alert(value, parent_key="", privacy_context=None):
     return value
 
 
-def minimize_report_evidence(alert, privacy_context=None):
-    """Keep only scalar alert fields approved for external AI analysis."""
+def select_ai_alert_fields(alert):
+    """Select bounded fields from the shared AI alert allowlist."""
     if not isinstance(alert, dict):
         return {}
 
     minimized = {}
-    for field in REPORT_EVIDENCE_FIELDS:
+    for field in AI_ALERT_FIELD_ALLOWLIST:
+        if field.endswith(".*"):
+            continue
         value = alert
         for part in field.split("."):
             if not isinstance(value, dict) or part not in value:
@@ -349,7 +344,7 @@ def minimize_report_evidence(alert, privacy_context=None):
         if isinstance(value, float) and not math.isfinite(value):
             continue
         if isinstance(value, (str, int, float, bool)):
-            accepted = value
+            accepted = value[:4096] if isinstance(value, str) else value
         elif isinstance(value, list):
             accepted = [
                 item
@@ -357,10 +352,13 @@ def minimize_report_evidence(alert, privacy_context=None):
                 if isinstance(item, (str, int, float, bool))
                 and not (isinstance(item, float) and not math.isfinite(item))
             ][:50]
+            accepted = [item[:4096] if isinstance(item, str) else item for item in accepted]
             if not accepted:
                 continue
         else:
             continue
+        if field == "agent.name":
+            accepted = "[REDACTED_HOST]"
 
         target = minimized
         parts = field.split(".")
@@ -368,4 +366,32 @@ def minimize_report_evidence(alert, privacy_context=None):
             target = target.setdefault(part, {})
         target[parts[-1]] = accepted
 
-    return sanitize_alert(minimized, privacy_context=privacy_context)
+    mitre = alert.get("rule", {}).get("mitre") if isinstance(alert.get("rule"), dict) else None
+    if isinstance(mitre, dict):
+        def safe_mitre(value):
+            if isinstance(value, dict):
+                return {
+                    str(key): child
+                    for key, item in value.items()
+                    if (child := safe_mitre(item)) is not None
+                }
+            if isinstance(value, list):
+                return [child for item in value[:50] if (child := safe_mitre(item)) is not None]
+            if isinstance(value, (str, int, float, bool)) and not (
+                isinstance(value, float) and not math.isfinite(value)
+            ):
+                return value[:4096] if isinstance(value, str) else value
+            return None
+
+        safe_mitre_value = safe_mitre(mitre)
+        if safe_mitre_value:
+            minimized.setdefault("rule", {})["mitre"] = safe_mitre_value
+
+    return minimized
+
+
+def minimize_report_evidence(alert, privacy_context=None):
+    """Apply the shared AI alert field allowlist and privacy filtering."""
+    return sanitize_alert(
+        select_ai_alert_fields(alert), privacy_context=privacy_context
+    )

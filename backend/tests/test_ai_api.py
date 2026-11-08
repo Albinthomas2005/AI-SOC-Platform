@@ -240,17 +240,18 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
         for excluded in (
             "full_log",
             "synthetic-full-log-value",
-            "dstuser",
-            "synthetic-user-value",
+            "dstip",
+            "192.168.1.7",
         ):
             self.assertNotIn(excluded, serialized_messages)
+        self.assertIn("dstuser", serialized_messages)
 
     def test_alert_with_no_allowlisted_fields_returns_422(self):
         with patch("app.explain_alert") as explain:
             response = self.post_alert(
                 {
                     "full_log": "synthetic raw log",
-                    "data": {"dstuser": "synthetic-user"},
+                    "hostname": "not-allowlisted",
                 }
             )
 
@@ -263,7 +264,7 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
 
     def test_private_addresses_are_pseudonymized_before_alert_analysis(self):
         alert = {
-            "data": {"srcip": "192.168.5.10", "dstip": "192.168.5.10"},
+            "data": {"srcip": "192.168.5.10"},
             "rule": {"description": "Connection from 192.168.5.10"},
         }
         with patch("app.explain_alert", return_value="Synthetic analysis") as explain:
@@ -273,7 +274,6 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
         supplied_alert = explain.call_args.args[0]
         pseudonyms = (
             supplied_alert["data"]["srcip"],
-            supplied_alert["data"]["dstip"],
             supplied_alert["rule"]["description"].split()[-1],
         )
         self.assertEqual(len(set(pseudonyms)), 1)
@@ -632,10 +632,7 @@ class TestGenerateReportAPI(unittest.TestCase):
                         "mitre": {"technique": ["T1110"]},
                         "description": "Synthetic login failure from [REDACTED_PUBLIC_IP]",
                     },
-                    "data": {
-                        "srcip": "[REDACTED_PUBLIC_IP]",
-                        "authentication_result": "failed",
-                    },
+                    "data": {"srcip": "[REDACTED_PUBLIC_IP]"},
                 },
             },
         )
@@ -659,7 +656,7 @@ class TestGenerateReportAPI(unittest.TestCase):
                 "id": "synthetic-alert-id",
                 "alert": {
                     "rule": {"description": "Observed 10.12.0.8 and fd12::8"},
-                    "data": {"srcip": "10.12.0.8", "dstip": "fd12::8"},
+                    "data": {"srcip": "10.12.0.8"},
                 },
             },
             "analyst_notes": "Repeated 10.12.0.8 and fd12::8",
@@ -672,11 +669,10 @@ class TestGenerateReportAPI(unittest.TestCase):
         alert = generate.call_args.args[0]
         notes = generate.call_args.args[1]
         ipv4 = alert["data"]["srcip"]
-        ipv6 = alert["data"]["dstip"]
+        ipv6 = alert["rule"]["description"].split(" and ")[-1]
         self.assertEqual(alert["rule"]["description"], f"Observed {ipv4} and {ipv6}")
         self.assertEqual(notes, f"Repeated {ipv4} and {ipv6}")
         self.assertNotIn("10.12.0.8", str((alert, notes)))
-        self.assertNotIn("fd12::8", str((alert, notes)))
         self.assertEqual(original_alert["data"]["srcip"], "10.12.0.8")
 
     def test_numeric_and_encoded_report_evidence_and_notes_are_sanitized(self):
@@ -686,7 +682,7 @@ class TestGenerateReportAPI(unittest.TestCase):
                 "id": "synthetic-alert-id",
                 "alert": {
                     "rule": {"description": "Observed IP 0xC0A80107"},
-                    "data": {"srcip": 3232235783, "dstip": "0xC0A80107"},
+                    "data": {"srcip": 3232235783},
                 },
             },
             "analyst_notes": (
@@ -700,7 +696,6 @@ class TestGenerateReportAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         safe_alert, safe_notes = generate.call_args.args
         address = safe_alert["data"]["srcip"]
-        self.assertEqual(safe_alert["data"]["dstip"], address)
         self.assertEqual(safe_alert["rule"]["description"], f"Observed IP {address}")
         self.assertEqual(safe_notes.count(address), 2)
         self.assertNotIn("3232235783", str((safe_alert, safe_notes)))
@@ -804,6 +799,63 @@ class TestGenerateReportAPI(unittest.TestCase):
                 _generate("synthetic prompt")
         self.assertEqual(raised.exception.failure_reason, "missing_api_key")
         provider.assert_not_called()
+
+    def test_sudo_alert_full_log_is_excluded_from_analysis_prompt(self):
+        from groq_service import explain_alert
+
+        sudo_alert = {
+            "@timestamp": "2026-11-08T10:00:00Z",
+            "rule": {
+                "id": "5402",
+                "description": "sudo to root",
+                "level": 3,
+                "groups": ["sudo"],
+                "mitre": {"id": ["T1548.003"]},
+            },
+            "agent": {"name": "demo-agent", "id": "007"},
+            "data": {
+                "srcuser": "analyst",
+                "dstuser": "root",
+                "full_log": "SENSITIVE-SUDO-RAW-LOG",
+            },
+            "location": "/var/log/auth.log",
+            "hostname": "must-not-be-included",
+        }
+        with patch("groq_service._generate", return_value=VALID_ANALYSIS) as generate:
+            explain_alert(sudo_alert)
+        prompt = generate.call_args.args[0]
+        self.assertNotIn("SENSITIVE-SUDO-RAW-LOG", prompt)
+        self.assertNotIn("must-not-be-included", prompt)
+        self.assertIn('"id": "5402"', prompt)
+        self.assertNotIn("srcip", prompt)
+
+    def test_training_coaching_alert_is_reduced_to_shared_allowlist(self):
+        from groq_service import coach_training_report
+
+        scenario = {
+            "id": "demo-sudo",
+            "title": "Sudo to root",
+            "alert": {
+                "rule": {"id": "5402", "description": "sudo to root"},
+                "data": {
+                    "dstuser": "root",
+                    "full_log": "SENSITIVE-TRAINING-RAW-LOG",
+                },
+                "hostname": "must-not-be-included",
+            },
+            "evidence": {
+                "log_lines": ["SENSITIVE-TRAINING-RAW-LOG"],
+                "context_notes": ["private training note"],
+            },
+        }
+        response = '{"what_was_good":"good","what_was_missed":"missed","one_thing_to_practise":"practice"}'
+        with patch("groq_service._generate", return_value=response) as generate:
+            coach_training_report("Synthetic report", scenario, "Synthetic explanation")
+        prompt = generate.call_args.args[0]
+        self.assertNotIn("SENSITIVE-TRAINING-RAW-LOG", prompt)
+        self.assertNotIn("must-not-be-included", prompt)
+        self.assertNotIn("private training note", prompt)
+        self.assertIn('"id": "5402"', prompt)
 
     def test_reasoning_parameters_are_limited_to_gpt_oss_models(self):
         from types import SimpleNamespace
