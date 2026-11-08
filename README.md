@@ -107,10 +107,11 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
 | Deterministic event correlation groups alerts by shared host, user, or source IP in a configurable time window and returns evidence timelines; AI summarizes only grouped, privacy-filtered results. | Correlation UI and browser verification. |
 | SQLite incident API creates incidents from alerts or correlation groups, validates status transitions, records assignment/notes/decisions/evidence, and generates Markdown reports. | Incident UI and browser verification. |
 | Threat-intel API extracts public IOCs, filters private addresses/internal hostnames, and supports VirusTotal/AbuseIPDB through env-keyed adapters with SQLite cache and per-provider limits. AI summarizes only returned provider data. | Threat-intel UI and provider behavior with real API credentials. |
+| Hunting proposals validate a read-only OpenSearch query against an index/clause/field/size allowlist and local MITRE catalog; the plugin executes as the signed-in OpenSearch user and saves a result interpretation. | Hunting page and browser verification. Plugin server tests are written, not run. |
 | Backend, Dashboard server, scripts, and evaluator use `SOC_AI_PORT` (default `5000`). | Live evaluation; the CLI and report path have only been checked with mocks. |
-| Evaluation CLI reads `GROQ_API_KEY` and `SOC_AI_INTERNAL_TOKEN` from the process environment and targets `docs/EVALUATION_RESULTS.md`. | AI threat hunting, roles/audit, retention/limits, assistant, plugin screens, and production readiness. |
+| Evaluation CLI reads `GROQ_API_KEY` and `SOC_AI_INTERNAL_TOKEN` from the process environment and targets `docs/EVALUATION_RESULTS.md`. | Roles/audit, retention/limits, assistant, remaining plugin screens, and production readiness. |
 
-For this phase, the backend suite passed **138 tests** and
+For this phase, the backend suite passed **144 tests** and
 `git diff --check` passed. The smoke script, browser UI, plugin build, live
 provider behavior, and live evaluation were not run.
 

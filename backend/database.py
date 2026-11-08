@@ -220,6 +220,20 @@ def init_db():
                 PRIMARY KEY (provider, window_start)
             )
         """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS hunting_reports (
+                hunt_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                question TEXT NOT NULL,
+                hypothesis TEXT NOT NULL,
+                query_json TEXT NOT NULL,
+                mitre_json TEXT NOT NULL,
+                results_json TEXT,
+                interpretation TEXT,
+                created_at TEXT NOT NULL,
+                completed_at TEXT
+            )
+        """)
 
 
 def add_alert(timestamp, severity, rule, source_ip, status="New"):

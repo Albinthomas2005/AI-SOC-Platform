@@ -228,6 +228,19 @@ limit. Only returned provider data is included in the AI summary prompt; when
 there is no returned data, the API says so without calling the AI provider.
 HTTP behavior is covered with mocks; no live provider request has been run.
 
+## Read-only hunting
+
+`POST /api/hunts/proposals` validates AI-proposed JSON against the local
+ATT&CK catalog, the `wazuh-alerts-4.x-*` index allowlist, an allowlist of
+query fields and clauses, and a maximum size of 1,000. Scripts and write
+operations are rejected. The Dashboard plugin's `POST /api/hunts/run`
+controller retrieves the signed-in Wazuh user, asks the backend for a
+proposal, validates the query envelope again, and runs it through
+`asCurrentUser.search`; the user's OpenSearch permissions therefore apply.
+It submits minimized results to `/api/hunts/<id>/results` for interpretation
+and storage. Hunt reports are scoped to their creating username. Provider
+prompts are privacy-filtered by the existing backend provider boundary.
+
 ## Security notes
 
 - Never commit API keys, passwords, private keys, databases, or real security logs.

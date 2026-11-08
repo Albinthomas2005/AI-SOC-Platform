@@ -25,6 +25,7 @@ from threat_intel import (
     lookup_iocs,
     summarize_threat_intel,
 )
+from hunting import register_hunting_routes
 from groq_service import (
     explain_alert,
     generate_investigation_report,
@@ -84,6 +85,7 @@ def has_valid_internal_token():
 
 register_training_routes(app, has_valid_internal_token)
 register_incident_routes(app, has_valid_internal_token)
+register_hunting_routes(app, has_valid_internal_token)
 
 
 @app.route("/api/threat-intel/lookup", methods=["POST"])
