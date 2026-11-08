@@ -1,355 +1,191 @@
 # AI SOC Platform
 
-[![Backend tests](https://github.com/Albinthomas2005/AI-SOC-Platform/actions/workflows/backend-tests.yml/badge.svg?branch=main)](https://github.com/Albinthomas2005/AI-SOC-Platform/actions/workflows/backend-tests.yml)
-
-An educational security operations prototype that connects Wazuh alert review
-to a loopback-only Python API and a Groq language model. It helps an analyst
-read selected alert evidence and draft investigation notes. It does not
-automate containment or replace analyst judgment.
-
-## Quick start
-
-1. Copy `backend/.env.example` to `backend/.env`, replace the secret
-   placeholders, then start the local backend from the repository root
-   (requires `backend/.venv`):
-
-   ```bash
-   ./scripts/run-backend.sh
-   ```
-
-2. From the repository root, run the backend suite (tests use temporary DBs):
-
-   ```bash
-   PYTHON_DOTENV_DISABLED=1 backend/.venv/bin/python -m unittest discover backend
-   ```
-
-3. Set `SOC_AI_INTERNAL_TOKEN` in your shell from your protected local
-   configuration, then check the training endpoints:
-
-   ```bash
-   ./scripts/smoke-test.sh
-   ```
-
-4. Build the Dashboard plugin in its pinned dependency environment, then
-   install a successful workflow artifact on the target host:
-
-   ```bash
-   cd wazuh-dashboard/plugins/main
-   OPENSEARCH_DASHBOARDS_VERSION=2.19.6 yarn build
-   cd ../../..
-   ./scripts/install-plugin.sh RUN_ID
-   ```
-
-   The installer requires a successful artifact workflow run ID and access to
-   the target Dashboard installation; see its usage before installing.
-
-## Merge preparation
-
-The repository `.gitignore` covers `.env`, database files, logs, backups, and
-`node_modules`. A local Git-history scan for common Groq, GitHub, AWS, and
-private-key signatures found no matches; this is a limited signature scan,
-not proof that every possible secret is absent. History was not rewritten.
-
-`backend/.env.example` lists the environment variables read by the backend
-and plugin server controllers. `scripts/run-backend.sh` forces a loopback
-host; set `SOC_AI_PORT` in the shell before starting it when using a non-default
-port. The smoke script reads `backend/.env` for its token.
-
-Wazuh app files changed on this branch include:
-
-- `public/app-router.tsx`, `public/plugin.ts`, `public/types.ts`, and `public/utils/applications.ts`.
-- `public/components/ai-soc-dashboard/{index.tsx,index.test.tsx,route.tsx,route.test.tsx}`.
-- `public/components/common/wazuh-discover/{wz-discover.tsx,components/ai-analysis-tab.tsx,components/ai-analysis-tab.test.tsx,components/ai-analysis-tabs.tsx,components/ai-analysis-tabs.test.tsx}`.
-- `public/components/overview/mitre/framework/components/techniques/components/flyout-technique/technique-row-details.tsx`.
-- `public/components/phase-workbench/{index.tsx,index.test.tsx}` and `public/components/discover-ai-analyst/{index.tsx,index.test.tsx}`.
-- `server/controllers/{index.ts,wazuh-ai.ts,wazuh-hunting.ts,wazuh-phase.ts}`.
-- `server/routes/{index.ts,wazuh-ai-report.test.ts,wazuh-hunting.ts,wazuh-hunting.test.ts,wazuh-phase.ts}`.
-
-The backend suite passed 171 tests in the latest run. Dashboard plugin Jest
-tests have not run; `yarn` is unavailable in this environment.
-
-## Demo data
-
-Create a clearly labeled synthetic SSH sequence, sudo session, and resolved
-incident in a dedicated database:
-
-```bash
-PYTHON_DOTENV_DISABLED=1 backend/.venv/bin/python scripts/seed-demo.py
-SOC_AI_DB_PATH="$PWD/backend/soc_alerts-demo.db" PYTHON_DOTENV_DISABLED=1 backend/.venv/bin/python backend/app.py
-```
-
-The seed script refuses the normal `backend/soc_alerts.db` path. Add `--reset`
-to replace only its fixtures. The backend must receive `SOC_AI_DB_PATH` before
-startup to use the demo database.
-
-## Problem and approach
-
-Wazuh provides alerts and investigation context, while an analyst may want a
-plain-language explanation or a structured report draft. This project adds a
-Dashboard plugin and a small backend for that workflow. The backend applies
-an alert-field allowlist and privacy filtering before provider calls. A local
-analyst decision record can mark generated output approved, edited, or
-rejected.
+An educational Wazuh Dashboard extension and local Flask service for reviewing
+alerts, grouping related events, and drafting analyst notes. AI output is
+unverified until an analyst reviews it. The project does not perform
+containment or other automatic remediation.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  Analyst[Analyst in Wazuh Dashboard]
-  Plugin[Wazuh 4.14.9 plugin server]
+  Analyst[Analyst]
+  Dashboard[Wazuh Dashboard plugin]
   Search[OpenSearch as signed-in user]
-  Backend[Flask backend on loopback]
-  Filter[Allowlist and privacy filter]
-  Provider[Groq API]
-  DB[(Local SQLite decisions)]
+  Backend[Flask service on loopback]
+  Filter[Shared alert field allowlist and privacy filter]
+  Provider[Groq or loopback Ollama]
+  Database[(SQLite)]
 
-  Analyst --> Plugin
-  Plugin -->|authorized alert lookup| Search
-  Search --> Plugin
-  Plugin -->|internal bearer token| Backend
+  Analyst --> Dashboard
+  Dashboard -->|alert lookup with user's permissions| Search
+  Search --> Dashboard
+  Dashboard -->|authenticated same-origin proxy| Backend
   Backend --> Filter
-  Filter -->|sanitized prompt and evidence| Provider
+  Filter --> Provider
   Provider --> Backend
-  Backend --> DB
-  Backend --> Plugin
-  Plugin --> Analyst
+  Backend --> Database
+  Backend --> Dashboard
+  Dashboard --> Analyst
 ```
 
-The browser never receives the Groq key or the backend internal token. The
-Dashboard server performs the selected-alert lookup as the signed-in user;
-the backend independently reapplies its allowlist. Only the Dashboard service
-and the backend are expected to use the internal token. The provider defaults
-to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
+The browser does not receive the provider API key or backend token. The
+Dashboard server reads selected alerts as the signed-in user, then calls the
+backend with an internal bearer token. The backend checks the token and applies
+its own field allowlist and privacy filtering before building AI prompts.
 
-## Repository map
+## Features
 
-- `backend/`: Flask API, Groq service, privacy filter, SQLite persistence,
-  importer, evaluation harness, and unit tests.
-- `wazuh-dashboard/`: Wazuh Dashboard source and the Wazuh 4.14.9 plugin in
-  `wazuh-dashboard/plugins/main/`.
-- `datasets/simulated-alerts/`: synthetic alert examples and 14 evaluation
-  scenarios. These are not production telemetry.
-- `datasets/training/`: analyst-visible scenarios and a separate server-only
-  answer-key file.
-- `data/`: generated local Enterprise ATT&CK catalog and build instructions;
-  the raw STIX source is kept locally under ignored `data/raw/`.
-- `docs/`: evaluation analysis, privacy explanation, and limitations.
-- `documentation/`: architecture, installation, systemd, and historical
-  evaluation materials.
+| Area | What is in the repository | Verification |
+|---|---|---|
+| Alert AI Analysis | Shared tab in Threat Hunting, Malware Detection Events, MITRE Events, and the MITRE technique recent-events flyout. | Render tests written; plugin Jest tests not run. |
+| Reports | Selected-alert report drafts, safe provider failure reasons, authenticated provider health endpoint, and analyst approve/edit/reject records. | Backend unit tests ran; provider health against live services was not checked. |
+| Workbench | Correlation, incidents, threat intelligence, read-only hunting, audit, and evidence assistant panels. | Backend unit tests ran; plugin Jest tests and browser use were not verified. |
+| Analyst training | Synthetic scenarios, deterministic grading, and AI coaching routes. | Backend unit tests ran; no live provider call was made. |
+| Demo seed | Labeled SSH failures, a sudo-to-root event, and a resolved incident in a separate SQLite file. | Seed tests use temporary databases and ran in the backend suite. |
 
-## Project status
+The SOC Workbench is registered at `/phase-workbench` and in the Wazuh
+application list as **SOC Workbench**. It is reachable from the AI SOC
+Dashboard's **Workbench** button and the left navigation.
 
-| Phase | Status |
-|---|---|
-| 1: backend analysis, report review/decisions, training, shifts, port configuration | Implemented, unverified in browser |
-| 4: deterministic correlation API and timeline | Implemented, unverified in browser |
-| 5: incident API, validated status transitions, evidence, notes and reports | Implemented, unverified in browser |
-| 6: public IOC extraction, privacy filtering, provider adapters, cache and limits | Implemented, unverified in browser; live providers not checked |
-| 7: validated read-only hunting workflow | Implemented, unverified in browser |
-| 9: role-scoped evidence assistant | Implemented, unverified in browser |
-| 10a: role enforcement and append-only audit | Implemented, unverified in browser |
-| 10b: dry-run retention and request/rate limits | Implemented, unverified in browser |
-| Plugin workbench for correlation, incidents, intel, hunting, audit and assistant | Implemented, unverified in browser; plugin tests written, not run |
-| Evaluation CLI | Implemented with mocked tests; live evaluation not run |
-| AI Analysis in Threat Hunting, Malware Detection, MITRE Events, and technique recent-event details | Implemented in source; plugin render tests written, not run |
+## Setup
 
-Pending: browser test, Dashboard plugin build, screenshots, analyst review of
-the 16 **DRAFT** answer keys, evaluation rerun/live evaluation, event-correlation
-browser review, production data retention/load test, and production readiness.
-The backend suite has passed **157 tests** in the last recorded run; the smoke
-script, browser UI, plugin build, live provider behavior, and live evaluation
-have not been run for this workbench update.
+The backend requires Python dependencies from `backend/requirements.txt`. The
+Dashboard plugin targets Wazuh Dashboard 4.14.9 and OpenSearch Dashboards
+2.19.6.
 
-## Training Mode
+1. Create the local environment file and replace its placeholders. Keep the
+   resulting file private and untracked.
 
-Training Mode provides a scenario queue, alert and evidence views, deterministic
-grading, free hints, report completeness feedback, and structured AI report
-coaching. After submission, the analyst can compare their verdict and MITRE
-choices with the AI assessment and expected answer. Progress includes accuracy,
-common mistakes, review reminders, and exportable reports. Timed shifts use
-eight mixed cases, a 20-minute timer, no hints, separate shift storage, and an
-AI-coached handover note. The 16 new answer keys are **DRAFTS pending analyst
-review**; do not treat them as trusted ground truth until reviewed.
+   ```bash
+   cp backend/.env.example backend/.env
+   chmod 600 backend/.env
+   ```
 
-### Setup and run
+   Set `GROQ_API_KEY` for Groq, or choose Ollama with
+   `SOC_AI_PROVIDER=ollama` and a loopback `OLLAMA_BASE_URL`. Generate a
+   `SOC_AI_INTERNAL_TOKEN` and configure the same value in the trusted
+   Dashboard server environment.
 
-Follow [Local setup](#local-setup) to create and activate `backend/.venv`,
-install requirements, and configure the backend environment. The backend reads
-scenario data from `datasets/training/` and the local ATT&CK catalog from
-`data/mitre_techniques.json`. Start it from `backend/`:
+2. Start the local backend from the repository root. The script pins the
+   backend host to loopback.
+
+   ```bash
+   ./scripts/run-backend.sh
+   ```
+
+   Set `SOC_AI_PORT` in the shell before starting the script to use a port
+   other than 5000.
+
+3. Build the plugin in the pinned Wazuh dependency environment.
+
+   ```bash
+   cd wazuh-dashboard/plugins/main
+   OPENSEARCH_DASHBOARDS_VERSION=2.19.6 yarn build
+   ```
+
+   `scripts/install-plugin.sh` installs a successful workflow artifact on an
+   authorized Dashboard host. It may need `sudo` to access the installation
+   and restarts the Dashboard service; those host actions have not been run
+   here.
+
+## Usage: SSH brute-force demo
+
+1. Seed the dedicated demo database. The script refuses the normal
+   `backend/soc_alerts.db` path and requires `demo` in the target filename.
+
+   ```bash
+   PYTHON_DOTENV_DISABLED=1 backend/.venv/bin/python scripts/seed-demo.py
+   ```
+
+   It creates three `[DEMO]` SSH failures from the documentation-only address
+   `203.0.113.50`, one `[DEMO]` sudo-to-root record, and one resolved `[DEMO]`
+   incident. Use `--reset` to replace only those fixtures.
+
+2. Start the backend against that database by setting its path before Python
+   imports the application:
+
+   ```bash
+   SOC_AI_DB_PATH="$PWD/backend/soc_alerts-demo.db" ./scripts/run-backend.sh
+   ```
+
+3. In the Wazuh Dashboard, open **SOC Workbench** from the left menu or the
+   **Workbench** button. The incident panel reads its incident list from the
+   backend database. Correlation and threat-intel panels resolve alert
+   references in OpenSearch as the signed-in user; the SQLite seed does not
+   populate OpenSearch. To use those panels, the equivalent synthetic events
+   must also be present in an authorized Wazuh alert index.
+
+The seed can be checked locally with the tests in
+`backend/tests/test_seed_demo.py`; it does not read the real database.
+
+## Security and privacy design
+
+- The backend uses bearer-token authentication. Dashboard routes use a
+  same-origin proxy and look up alerts as the current Dashboard user.
+- One shared allowlist selects `timestamp`, rule identifiers and descriptions,
+  rule groups and MITRE metadata, `agent.name`, selected source/destination
+  user fields, `data.srcip`, and `location`. Raw `full_log`, other host fields,
+  and unlisted alert data are excluded from AI evidence.
+- Address and sensitive-text patterns are filtered before AI prompts. Threat
+  intelligence only extracts IOCs from allowlisted alert fields and excludes
+  private IPs before external provider lookups. Pattern filtering is not a
+  guarantee of anonymity; review data handling before using real alerts.
+- Provider errors are translated into a short safe reason and logged with a
+  request ID. The authenticated `/api/ai/health` endpoint reports provider
+  configuration and reachability; no live health request was made here.
+- Role checks gate sensitive routes. Retention operations default to dry-run;
+  actual purge is admin-only. SQLite stores alert/report and analyst workflow
+  records locally.
+
+## Testing
+
+The backend suite was run from the repository root with:
 
 ```bash
-source .venv/bin/activate
-python app.py
+PYTHON_DOTENV_DISABLED=1 backend/.venv/bin/python -m unittest discover backend
 ```
 
-The Training page is part of the Wazuh Dashboard plugin at
-`wazuh-dashboard/plugins/main/`. With the pinned Dashboard dependencies
-installed, build from that directory:
+That run completed **171 tests successfully**. Tests use temporary databases
+and mocked providers. Dashboard plugin Jest tests have not run: `yarn` was not
+available in this environment. The plugin build, browser behavior, screenshots,
+Wazuh/OpenSearch integration, and live Groq/Ollama calls have not been verified.
 
-```bash
-OPENSEARCH_DASHBOARDS_VERSION=2.19.6 yarn build
-```
+## Limitations and future work
 
-### Tests
+- The UI requires a compatible running Wazuh Dashboard and authorized
+  OpenSearch data. Demo SQLite records alone do not create OpenSearch alerts.
+- AI-generated content can be wrong, incomplete, or influenced by untrusted
+  alert text. Analysts must verify it against source evidence.
+- The demo IP is reserved for documentation and is not routable evidence.
+- No live provider, Dashboard host install, plugin Jest suite, plugin build,
+  screenshots, or browser workflow was verified in this work.
+- Review generated training answer keys before treating them as grading truth.
+- Continue with a pinned-environment plugin test/build, browser review against
+  a lab Dashboard, and an operator-approved retention and deployment review.
 
-Run the backend suite from the repository root with the backend virtual
-environment active. Tests use temporary SQLite databases and mocked AI
-providers; they do not require live alert data or a provider key:
+## Repository hygiene and modified Wazuh files
 
-```bash
-source backend/.venv/bin/activate
-python -m unittest discover backend
-```
+Root and backend ignore rules cover `.env`, `*.db`, logs, backups, and
+`node_modules`. A local history scan for common Groq, GitHub, AWS, and private
+key signatures found no matches. This limited signature scan cannot establish
+that all possible secrets are absent; history was not rewritten. The current
+untracked audit file and `scripts/ci-loop.sh` were left untouched and unstaged.
 
-The TypeScript and plugin build require the pinned Wazuh Dashboard dependency
-environment; see the plugin build instructions above.
+Wazuh app files modified on this branch:
 
-### Screenshots
+- `public/app-router.tsx`, `public/plugin.ts`, `public/types.ts`,
+  `public/utils/applications.ts`.
+- `public/components/ai-soc-dashboard/index.tsx`, `index.test.tsx`,
+  `route.tsx`, `route.test.tsx`.
+- `public/components/common/wazuh-discover/wz-discover.tsx` and
+  `components/ai-analysis-tab.tsx`, `components/ai-analysis-tab.test.tsx`,
+  `components/ai-analysis-tabs.tsx`, `components/ai-analysis-tabs.test.tsx`.
+- `public/components/overview/mitre/framework/components/techniques/components/flyout-technique/technique-row-details.tsx`.
+- `public/components/phase-workbench/index.tsx`, `index.test.tsx`, and
+  `public/components/discover-ai-analyst/index.tsx`, `index.test.tsx`.
+- `server/controllers/index.ts`, `wazuh-ai.ts`, `wazuh-hunting.ts`,
+  `wazuh-phase.ts`; and `server/routes/index.ts`, `wazuh-ai-report.test.ts`,
+  `wazuh-hunting.ts`, `wazuh-hunting.test.ts`, `wazuh-phase.ts`.
 
-Screenshot placeholders (images are not included yet):
-
-- Scenario queue: `docs/screenshots/scenario-queue.png`
-- Evidence view: `docs/screenshots/evidence-view.png`
-- Score breakdown: `docs/screenshots/score-breakdown.png`
-- Analyst vs AI vs expected: `docs/screenshots/analyst-ai-expected.png`
-- Timed shift: `docs/screenshots/shift.png`
-
-See [Training Mode documentation](docs/TRAINING_MODE.md) for the scenario
-format, key separation, scoring rules, and limitations. See
-[`docs/ANSWER_KEY_REVIEW.md`](docs/ANSWER_KEY_REVIEW.md) for the generated
-review checklist covering all 16 draft keys.
-
-## Local setup
-
-The backend workflow uses Python 3.12. From the repository root:
-
-```bash
-cd backend
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-cp .env.example .env
-chmod 600 .env
-```
-
-Edit `backend/.env` locally. Set `GROQ_API_KEY` to your own key and generate a
-private backend token with:
-
-```bash
-python -c 'import secrets; print(secrets.token_urlsafe(32))'
-```
-
-Put it in `SOC_AI_INTERNAL_TOKEN` in the backend environment and configure the
-same value in the trusted Wazuh Dashboard service environment. Do not paste
-either secret into source control, logs, the browser, or this repository.
-`backend/.env.example` and the root `.env.example` contain placeholders only.
-
-The backend defaults to `127.0.0.1:5000`. `SOC_AI_PORT` sets the port used by
-the Flask service, Dashboard server, scripts, and evaluator. `SOC_AI_HOST` accepts
-loopback values by default; non-loopback binding requires
-`SOC_AI_ALLOW_NON_LOOPBACK=true` and separate network controls. Do not expose
-the backend port to the network.
-
-Start the backend from `backend/`:
-
-```bash
-python app.py
-```
-
-See [backend setup and API details](backend/README.md) and the
-[systemd example](documentation/systemd.md). The service unit has not been
-installed by this project workflow.
-
-## Tests and synthetic evaluation
-
-Run the backend unit suite without Wazuh or a live Groq call:
-
-```bash
-cd backend
-python -m unittest discover -s tests -v
-```
-
-The root workflow [`.github/workflows/backend-tests.yml`](.github/workflows/backend-tests.yml)
-runs the same command on pushes and pull requests to `main`, with Python 3.12.
-The separate plugin build workflow is manually dispatched.
-
-With the backend running and `GROQ_API_KEY` plus `SOC_AI_INTERNAL_TOKEN`
-exported in its process environment, run the synthetic evaluation from `backend/`:
-
-```bash
-python scripts/run_eval.py --delay 1 --save-responses eval-responses
-```
-
-The harness writes its summary to `docs/EVALUATION_RESULTS.md`. Saved
-response bodies may contain sanitized but identifying context; keep them
-local. The `eval-responses/` directory is ignored by Git. The live evaluation
-was not run for this stabilization task.
-
-## Dashboard plugin build and installation
-
-The source targets Wazuh Dashboard 4.14.9 and OpenSearch Dashboards 2.19.6.
-The root workflow `.github/workflows/build-dashboard-plugin.yml` builds in
-`quay.io/wazuh/osd-dev:2.19.6` and uploads the `wazuh-plugin-ai-soc` artifact.
-It has an optional lint/Jest input. The build and those checks have not been
-run after the current UI changes.
-
-On an authorized Ubuntu host with GitHub CLI access, first check the local
-installation without downloading an artifact:
-
-```bash
-./scripts/install-plugin.sh --check
-```
-
-Then provide a successful workflow run ID, or omit it to select the latest
-successful run:
-
-```bash
-./scripts/install-plugin.sh [RUN_ID]
-```
-
-The installer checks Dashboard version compatibility, stages the archive for
-the plugin user, backs up the installed plugin before replacing it, prints a
-rollback command, and restarts only `wazuh-dashboard`. It may require `sudo`
-for the protected system installation. Manual archive extraction is opt-in
-only (`MANUAL_INSTALL=1`) when no plugin installer executable is available.
-This host install has not yet been verified.
-
-## Privacy and limitations
-
-The provider boundary masks selected email, token, secret, address, hostname,
-URL, MAC, username, and path patterns. This does not prove anonymization;
-allowlisted descriptions and analyst notes can still contain identifying
-details and are sent to a third-party AI provider. Review data handling before
-using non-synthetic alerts.
-
-AI output may be wrong or incomplete. The local ATT&CK catalog checks whether
-technique IDs exist; it does not establish that an AI mapping fits the evidence.
-A human must review output before using it. The project does not correlate
-arbitrary event histories, block hosts, disable accounts, execute remediation,
-or replace Wazuh access control.
-
-Read [Privacy](docs/PRIVACY.md) and [Limitations](docs/LIMITATIONS.md) before
-connecting production data.
-
-For a local model, configure `SOC_AI_PROVIDER=ollama` and set `OLLAMA_MODEL`
-to a model already installed in Ollama. See the provider settings in
-[`backend/README.md`](backend/README.md). The adapter has mocked tests; a live
-Ollama installation has not yet been verified.
-
-## Roadmap
-
-- Run the Dashboard build and UI tests in the pinned Wazuh development image.
-- Load and review a current official Enterprise ATT&CK catalog.
-- Re-run the 14 synthetic scenarios and preserve local response evidence for
-  failures.
-- Verify the full analyst decision flow and report export on a lab Dashboard.
-- Review privacy behavior against representative, approved lab records.
-
-## License and attribution
-
-`wazuh-dashboard/` is a fork of Wazuh Dashboard, Copyright Wazuh, Inc.,
-distributed under GPL-2.0. The backend is currently treated as GPL-2.0 for
-this combined repository; the repository owner should confirm that choice.
-
-<!-- TODO: Owner confirmation of the backend license choice remains pending. -->
+The Wazuh plugin Jest tests have not run. No push was made.
