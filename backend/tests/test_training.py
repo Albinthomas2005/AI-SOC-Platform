@@ -103,7 +103,7 @@ class TrainingApiTests(unittest.TestCase):
             connection.execute("UPDATE training_attempts SET submitted_at = ?", ("2020-01-01T00:00:00+00:00",))
         progress = self.client.get("/training/progress", headers=HEADERS).get_json()["progress"]
         self.assertIn("under_escalation", {item["mistake"] for item in progress["common_mistakes"]})
-        self.assertTrue(any(item["type"] == "wrong_verdict" and item["category"] == "authentication" for item in progress["mistake_log"]))
+        self.assertTrue(any(item["type"] == "wrong_verdict" and item["category"] == "ssh_brute_force" and item["count"] == 1 and item["hint"] for item in progress["mistake_log"]))
         self.assertIn("ssh-brute-force", progress["review_scenario_ids"])
         self.assertEqual(progress["attempts"][0]["report_text"], COMPLETE_REPORT)
 
