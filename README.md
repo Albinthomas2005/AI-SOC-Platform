@@ -7,6 +7,42 @@ to a loopback-only Python API and a Groq language model. It helps an analyst
 read selected alert evidence and draft investigation notes. It does not
 automate containment or replace analyst judgment.
 
+## Quick start
+
+1. Start the local backend from the repository root (requires
+   `backend/.venv` and its local configuration):
+
+   ```bash
+   ./scripts/run-backend.sh
+   ```
+
+2. In another terminal, run the backend suite:
+
+   ```bash
+   source backend/.venv/bin/activate
+   python -m unittest discover backend
+   ```
+
+3. Set `SOC_AI_INTERNAL_TOKEN` in your shell from your protected local
+   configuration, then check the training endpoints:
+
+   ```bash
+   ./scripts/smoke-test.sh
+   ```
+
+4. Build the Dashboard plugin in its pinned dependency environment, then
+   install a successful workflow artifact on the target host:
+
+   ```bash
+   cd wazuh-dashboard/plugins/main
+   OPENSEARCH_DASHBOARDS_VERSION=2.19.6 yarn build
+   cd ../../..
+   ./scripts/install-plugin.sh RUN_ID
+   ```
+
+   The installer requires a successful artifact workflow run ID and access to
+   the target Dashboard installation; see its usage before installing.
+
 ## Problem and approach
 
 Wazuh provides alerts and investigation context, while an analyst may want a
@@ -62,22 +98,16 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
 - `documentation/`: architecture, installation, systemd, and historical
   evaluation materials.
 
-## Feature status
+## Project status
 
-| Feature | Status |
+| Done | Pending |
 |---|---|
-| Backend API input validation, training grading, and privacy tests | Verified by 106 local unit tests; training tests use temporary SQLite databases and mocked providers |
-| Live Groq analysis or training coaching | Not yet verified; no live provider call was made |
-| Wazuh Dashboard plugin build after these changes | Not yet verified; Dashboard dependencies are not installed here |
-| AI Alert Analysis in a live Dashboard | Not yet verified in this work session |
-| Generate Report end-to-end | Backend behavior is unit tested; Dashboard runtime is not yet verified |
-| Analyst approve/edit/reject flow | Backend persistence is unit tested; Dashboard interaction is not yet verified |
-| ATT&CK ID validation | Code and mocked tests are present; full local catalog is not yet provided |
-| Synthetic evaluation | A historical saved run recorded 8/14 passing before the current response-schema and MITRE changes; rerun before comparing |
-| Dashboard artifact installation | Installer checks are implemented; local install has not been run in this work session |
+| Training routes and client-side Markdown export are implemented; smoke checks were not run for this task. | Review the 16 draft answer keys with analysts. |
+| Backend suite: 109 tests passed for this task, using temporary databases and mocked providers. | Rerun the synthetic evaluation and review its results. |
+| Backend runner and training endpoint smoke script are in place; the smoke script was not run for this task. | Capture real Training Mode screenshots under `docs/screenshots/`. |
+| `git diff --check` passed for this task. | Build and install the Dashboard plugin in its pinned environment; not run for this task. |
 
-See [the evaluation notes](docs/EVALUATION.md) for the historical failures and
-comparison template. Results are not a security certification.
+Live provider behavior and the Dashboard UI were not verified in this task.
 
 ## Training Mode
 
