@@ -235,3 +235,59 @@ describe('POST /api/ai/analyze-alert controller authorization and privacy', () =
     expect(needle).not.toHaveBeenCalled();
   });
 });
+
+describe('training route proxy', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.SOC_AI_INTERNAL_TOKEN = 'synthetic-internal-token';
+  });
+
+  it('uses the signed-in username when submitting an attempt', async () => {
+    const context = createContext('signed-in-analyst');
+    needle.mockResolvedValue({ statusCode: 201, body: { ok: true, attempt_id: 'synthetic-id' } });
+    const response = createResponse();
+    const request = createRequest('signed-in-analyst', {
+      scenario_id: 'synthetic-case', verdict: 'benign', escalate: false,
+      mitre_ids: [], report_text: 'Synthetic report', time_spent: 30,
+      user_id: 'forged-user',
+    });
+
+    await controller.proxyTraining(context, request, response as any, '/attempts', 'post');
+
+    expect(needle).toHaveBeenCalledWith(
+      'post', expect.stringMatching(/\/training\/attempts$/),
+      expect.objectContaining({ user_id: 'signed-in-analyst' }),
+      expect.objectContaining({ headers: { Authorization: 'Bearer synthetic-internal-token' } }),
+    );
+  });
+
+  it('rejects training proxy requests without a signed-in user', async () => {
+    const context = createContext();
+    context.wazuh.security.getCurrentUser.mockResolvedValue(null);
+    const response = createResponse();
+
+    const result = await controller.proxyTraining(context, createRequest(), response as any, '/scenarios', 'get');
+
+    expect(result.statusCode).toBe(401);
+    expect(needle).not.toHaveBeenCalled();
+  });
+
+  it('fetches imported practice alerts as the signed-in user and sends only minimized fields', async () => {
+    const context = createContext('signed-in-analyst');
+    needle.mockResolvedValue({ statusCode: 201, body: { ok: true, case: { status: 'unscored - no answer key' } } });
+    const response = createResponse();
+    const result = await controller.importTrainingAlert(context, createRequest(), response as any);
+    expect(result.statusCode).toBe(201);
+    expect(context.search).toHaveBeenCalledWith(expect.objectContaining({
+      index: alertIndex,
+      body: expect.objectContaining({ query: { ids: { values: [alertId] } } }),
+    }));
+    expect(needle).toHaveBeenCalledWith('post', expect.stringMatching(/\/training\/imported-cases$/), expect.objectContaining({
+      user_id: 'signed-in-analyst',
+      alert: expect.objectContaining({ rule: expect.objectContaining({ description: source.rule.description }) }),
+    }), expect.any(Object));
+    const submitted = needle.mock.calls[0][2];
+    expect(JSON.stringify(submitted)).not.toContain('private raw log content');
+    expect(JSON.stringify(submitted)).not.toContain('synthetic-secret');
+  });
+});

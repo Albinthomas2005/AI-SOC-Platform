@@ -50,9 +50,13 @@ type NeedlePost = (
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const needle = require('needle') as NeedlePost;
 
-const AI_SERVICE_URL = 'http://127.0.0.1:5000/api/ai/analyze-alert';
-const AI_REPORT_SERVICE_URL = 'http://127.0.0.1:5000/api/ai/generate-report';
-const AI_DECISION_SERVICE_URL = 'http://127.0.0.1:5000/api/ai/analysis';
+const AI_SERVICE_BASE_URL =
+  process.env.SOC_AI_BASE_URL ||
+  `http://${process.env.SOC_AI_HOST || '127.0.0.1'}:${process.env.SOC_AI_PORT || '5000'}`;
+const AI_SERVICE_URL = `${AI_SERVICE_BASE_URL}/api/ai/analyze-alert`;
+const AI_REPORT_SERVICE_URL = `${AI_SERVICE_BASE_URL}/api/ai/generate-report`;
+const AI_DECISION_SERVICE_URL = `${AI_SERVICE_BASE_URL}/api/ai/analysis`;
+const TRAINING_SERVICE_URL = `${AI_SERVICE_BASE_URL}/training`;
 const MAX_AI_REPORT_NOTES_CHARS = 4000;
 const MAX_AI_ALERT_BYTES = 256 * 1024;
 const AI_SERVICE_TIMEOUT_MS = 45000;
@@ -180,6 +184,86 @@ function getErrorStatusCode(error: unknown): unknown {
 }
 
 export class WazuhAiCtrl {
+  async importTrainingAlert(context: RequestHandlerContext, request: OpenSearchDashboardsRequest, response: OpenSearchDashboardsResponseFactory) {
+    let username: string;
+    try {
+      const currentUser = await context.wazuh.security.getCurrentUser(request, context);
+      if (!currentUser || typeof currentUser.username !== 'string') throw new Error('unauthenticated');
+      username = currentUser.username;
+    } catch {
+      return response.custom({ statusCode: 401, body: { ok: false, error: 'Authentication required' } });
+    }
+    const body = (request.body || {}) as { index?: unknown; id?: unknown };
+    if (typeof body.index !== 'string' || typeof body.id !== 'string' || !body.id || Buffer.byteLength(body.id, 'utf8') > 512) {
+      return response.custom({ statusCode: 400, body: { ok: false, error: 'A valid alert reference is required' } });
+    }
+    let pattern: unknown;
+    try { pattern = await context.wazuh_core.configuration.getSettingValue('pattern'); }
+    catch { return response.custom({ statusCode: 503, body: { ok: false, error: 'Training service is unavailable' } }); }
+    if (!matchesAlertIndexPattern(body.index, pattern)) return response.custom({ statusCode: 400, body: { ok: false, error: 'A valid alert reference is required' } });
+    const token = process.env.SOC_AI_INTERNAL_TOKEN;
+    if (!token) return response.custom({ statusCode: 503, body: { ok: false, error: 'Training service is unavailable' } });
+    try {
+      const result = await context.core.opensearch.client.asCurrentUser.search({ index: body.index, body: { size: 1, track_total_hits: false, query: { ids: { values: [body.id] } }, _source: ALLOWED_ALERT_FIELDS } });
+      const source = result?.body?.hits?.hits?.[0]?._source;
+      if (!source) return response.custom({ statusCode: 404, body: { ok: false, error: 'Alert is unavailable' } });
+      const upstream = await needle('post', `${TRAINING_SERVICE_URL}/imported-cases`, { alert: minimizeAlert(source), user_id: username }, { json: true, headers: { Authorization: `Bearer ${token}` }, open_timeout: AI_SERVICE_TIMEOUT_MS, response_timeout: AI_SERVICE_TIMEOUT_MS });
+      return response.custom({ statusCode: upstream.statusCode || 502, body: upstream.body });
+    } catch (error) {
+      if (getErrorStatusCode(error) === 403) return response.custom({ statusCode: 403, body: { ok: false, error: 'Access to this alert is denied' } });
+      return response.custom({ statusCode: 503, body: { ok: false, error: 'Training service is unavailable' } });
+    }
+  }
+
+  async proxyTraining(
+    context: RequestHandlerContext,
+    request: OpenSearchDashboardsRequest,
+    response: OpenSearchDashboardsResponseFactory,
+    path: string,
+    method: 'get' | 'post',
+  ) {
+    let username: string;
+    try {
+      const currentUser = await context.wazuh.security.getCurrentUser(request, context);
+      if (!currentUser || typeof currentUser.username !== 'string') throw new Error('unauthenticated');
+      username = currentUser.username;
+    } catch {
+      return response.custom({ statusCode: 401, body: { ok: false, error: 'Authentication required' } });
+    }
+    const internalToken = process.env.SOC_AI_INTERNAL_TOKEN;
+    if (!internalToken) {
+      return response.custom({ statusCode: 503, body: { ok: false, error: 'Training service is unavailable' } });
+    }
+    let target = `${TRAINING_SERVICE_URL}${path}`;
+    if (method === 'get') {
+      const query = new URLSearchParams(request.query as Record<string, string> || {});
+      query.set('user_id', username);
+      target += `?${query.toString()}`;
+    }
+    const body = method === 'post' ? { ...(request.body || {}), user_id: username } : {};
+    try {
+      const upstream = await needle(method, target, body, {
+        json: true,
+        headers: { Authorization: `Bearer ${internalToken}` },
+        // eslint-disable-next-line camelcase
+        open_timeout: AI_SERVICE_TIMEOUT_MS,
+        // eslint-disable-next-line camelcase
+        response_timeout: AI_SERVICE_TIMEOUT_MS,
+        // eslint-disable-next-line camelcase
+        read_timeout: AI_SERVICE_TIMEOUT_MS,
+      });
+      if (typeof upstream.statusCode !== 'number' || upstream.statusCode < 200 || upstream.statusCode >= 300 || upstream.body?.ok !== true) {
+        return response.custom({
+          statusCode: upstream.statusCode && upstream.statusCode >= 400 && upstream.statusCode < 500 ? upstream.statusCode : 503,
+          body: upstream.body?.ok === false ? upstream.body : { ok: false, error: 'Training service is unavailable' },
+        });
+      }
+      return response.ok({ body: upstream.body });
+    } catch {
+      return response.custom({ statusCode: 503, body: { ok: false, error: 'Training service is unavailable' } });
+    }
+  }
+
   async analyzeAlert(
     context: RequestHandlerContext,
     request: OpenSearchDashboardsRequest,

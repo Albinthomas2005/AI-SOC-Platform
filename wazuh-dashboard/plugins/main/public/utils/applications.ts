@@ -182,6 +182,25 @@ export const aiSocDashboard = {
   redirectTo: () => '/ai-soc-dashboard',
 };
 
+export const analystTraining = {
+  category: 'wz-category-security-operations',
+  id: 'analyst-training',
+  title: i18n.translate('wazuh.analystTraining.app.title', {
+    defaultMessage: 'Training',
+  }),
+  breadcrumbLabel: i18n.translate('wazuh.analystTraining.app.breadcrumbLabel', {
+    defaultMessage: 'Training',
+  }),
+  description: i18n.translate('wazuh.analystTraining.app.description', {
+    defaultMessage: 'Practice evidence-based alert triage with synthetic scenarios.',
+  }),
+  euiIconType: 'securityAnalyticsApp',
+  order: 402,
+  showInOverviewApp: true,
+  showInAgentMenu: false,
+  redirectTo: () => '/training',
+};
+
 export const vulnerabilityDetection = {
   category: 'wz-category-threat-intelligence',
   id: 'vulnerability-detection',
@@ -890,6 +909,7 @@ export const Applications = [
   configurationAssessment,
   threatHunting,
   aiSocDashboard,
+  analystTraining,
   vulnerabilityDetection,
   mitreAttack,
   pciDss,

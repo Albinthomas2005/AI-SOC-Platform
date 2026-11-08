@@ -54,6 +54,8 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
   `wazuh-dashboard/plugins/main/`.
 - `datasets/simulated-alerts/`: synthetic alert examples and 14 evaluation
   scenarios. These are not production telemetry.
+- `datasets/training/`: analyst-visible scenarios and a separate server-only
+  answer-key file.
 - `data/`: instructions and loader input location for a local Enterprise
   ATT&CK catalog. No full catalog is bundled.
 - `docs/`: evaluation analysis, privacy explanation, and limitations.
@@ -64,9 +66,9 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
 
 | Feature | Status |
 |---|---|
-| Backend API input validation, allowlisting, and privacy tests | Verified by local unit tests (88 passed in the latest run during this work) |
-| Live Groq analysis from this branch | Not yet verified; no provider call was made |
-| Wazuh Dashboard plugin build after portfolio changes | Not yet verified; Dashboard dependencies are not installed here |
+| Backend API input validation, training grading, and privacy tests | Verified by 106 local unit tests; training tests use temporary SQLite databases and mocked providers |
+| Live Groq analysis or training coaching | Not yet verified; no live provider call was made |
+| Wazuh Dashboard plugin build after these changes | Not yet verified; Dashboard dependencies are not installed here |
 | AI Alert Analysis in a live Dashboard | Not yet verified in this work session |
 | Generate Report end-to-end | Backend behavior is unit tested; Dashboard runtime is not yet verified |
 | Analyst approve/edit/reject flow | Backend persistence is unit tested; Dashboard interaction is not yet verified |
@@ -76,6 +78,28 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
 
 See [the evaluation notes](docs/EVALUATION.md) for the historical failures and
 comparison template. Results are not a security certification.
+
+## Training Mode
+
+Training Mode provides synthetic analyst exercises with deterministic server
+grading, free hints, report completeness feedback, and structured AI report
+coaching. The analyst's verdict and MITRE choices are shown alongside the AI
+assessment and expected result after submission. A separate progress view
+summarizes stored attempts. Timed shifts use eight mixed cases, a 20-minute
+timer, no hints, separate shift storage, and an AI-coached handover note.
+
+| Training capability | Status |
+|---|---|
+| Backend scenario, grading, progress, disagreement, shift, and handover APIs | Implemented; backend unit tests use temporary SQLite databases and mocked providers |
+| Dashboard Training page and server proxy routes | Implemented; TypeScript tests written, not run because plugin dependencies are absent |
+| New scenarios | 16 synthetic drafts; each answer key needs review by the person using the tool before being trusted |
+| Legacy scenarios | 14 converted; 8 have ambiguous expected dispositions and are not graded on those fields |
+| Local ATT&CK validation | Unverified until a reviewed local catalog is installed |
+| Dashboard build and plugin tests | Not run in this workspace; use the pinned Wazuh Dashboard dependency environment |
+
+See [Training Mode documentation](docs/TRAINING_MODE.md) for the scenario
+format, key separation, scoring rules, and limitations. Do not use draft answer
+keys as trusted ground truth before review.
 
 ## Local setup
 

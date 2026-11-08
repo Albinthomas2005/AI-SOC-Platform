@@ -1,0 +1,435 @@
+[
+  {
+    "id": "ssh-brute-force",
+    "expected_verdict": "true_positive",
+    "expected_escalate": true,
+    "accepted_mitre_ids": [
+      "T1110.001"
+    ],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "Repeated SSH failures are observable; a successful compromise is not established.",
+    "answer_status": "provisional",
+    "ambiguity_note": null
+  },
+  {
+    "id": "multiple-failed-logins",
+    "expected_verdict": "true_positive",
+    "expected_escalate": true,
+    "accepted_mitre_ids": [
+      "T1110"
+    ],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "Multiple failed logins are observable; no successful authentication is shown.",
+    "answer_status": "provisional",
+    "ambiguity_note": null
+  },
+  {
+    "id": "privilege-escalation",
+    "expected_verdict": "true_positive",
+    "expected_escalate": true,
+    "accepted_mitre_ids": [
+      "T1068"
+    ],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "A privileged operation was attempted; successful escalation is not established.",
+    "answer_status": "provisional",
+    "ambiguity_note": null
+  },
+  {
+    "id": "file-modification",
+    "expected_verdict": null,
+    "expected_escalate": null,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "File integrity monitoring observed a change; intent and authorization are not provided.",
+    "answer_status": "ambiguous - needs analyst review",
+    "ambiguity_note": "The fixture does not establish intent, successful outcome, or authorization sufficiently for a unique expected disposition."
+  },
+  {
+    "id": "malware-detection",
+    "expected_verdict": null,
+    "expected_escalate": null,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "A malware signature was detected during file execution; impact is not established.",
+    "answer_status": "ambiguous - needs analyst review",
+    "ambiguity_note": "The fixture does not establish intent, successful outcome, or authorization sufficiently for a unique expected disposition."
+  },
+  {
+    "id": "suspicious-powershell",
+    "expected_verdict": null,
+    "expected_escalate": null,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "Encoded PowerShell was observed; command execution and intent need verification.",
+    "answer_status": "ambiguous - needs analyst review",
+    "ambiguity_note": "The fixture does not establish intent, successful outcome, or authorization sufficiently for a unique expected disposition."
+  },
+  {
+    "id": "port-scan",
+    "expected_verdict": null,
+    "expected_escalate": null,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "Several destination ports were contacted; the source intent is unverified.",
+    "answer_status": "ambiguous - needs analyst review",
+    "ambiguity_note": "The fixture does not establish intent, successful outcome, or authorization sufficiently for a unique expected disposition."
+  },
+  {
+    "id": "suspicious-connection",
+    "expected_verdict": null,
+    "expected_escalate": null,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "An outbound connection used a non-standard port; destination purpose is unverified.",
+    "answer_status": "ambiguous - needs analyst review",
+    "ambiguity_note": "The fixture does not establish intent, successful outcome, or authorization sufficiently for a unique expected disposition."
+  },
+  {
+    "id": "new-user-account",
+    "expected_verdict": null,
+    "expected_escalate": null,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "A local account was created; authorization and purpose are not provided.",
+    "answer_status": "ambiguous - needs analyst review",
+    "ambiguity_note": "The fixture does not establish intent, successful outcome, or authorization sufficiently for a unique expected disposition."
+  },
+  {
+    "id": "unusual-authentication",
+    "expected_verdict": null,
+    "expected_escalate": null,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "A successful authentication from an unusual source is reported; user intent is unverified.",
+    "answer_status": "ambiguous - needs analyst review",
+    "ambiguity_note": "The fixture does not establish intent, successful outcome, or authorization sufficiently for a unique expected disposition."
+  },
+  {
+    "id": "benign-successful-login",
+    "expected_verdict": "benign",
+    "expected_escalate": false,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "The fixture explicitly describes an authorized login during normal hours.",
+    "answer_status": "provisional",
+    "ambiguity_note": null
+  },
+  {
+    "id": "routine-package-update",
+    "expected_verdict": "benign",
+    "expected_escalate": false,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "The fixture explicitly describes a routine package update completing successfully.",
+    "answer_status": "provisional",
+    "ambiguity_note": null
+  },
+  {
+    "id": "prompt-injection-description",
+    "expected_verdict": "benign",
+    "expected_escalate": false,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "The instruction-like description is untrusted log text and is not evidence of a breach.",
+    "answer_status": "provisional",
+    "ambiguity_note": null
+  },
+  {
+    "id": "encoded-powershell-no-mitre",
+    "expected_verdict": null,
+    "expected_escalate": null,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Identify only what the alert directly establishes.",
+      "Separate observed events from intent and impact.",
+      "Name one useful verification step and its missing evidence."
+    ],
+    "explanation": "Encoded PowerShell was observed, but execution is explicitly not established.",
+    "answer_status": "ambiguous - needs analyst review",
+    "ambiguity_note": "The fixture does not establish intent, successful outcome, or authorization sufficiently for a unique expected disposition."
+  },
+  {
+    "id": "ssh-no-success",
+    "expected_verdict": "true_positive",
+    "expected_escalate": true,
+    "accepted_mitre_ids": [
+      "T1110.001"
+    ],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "Repeated failures warrant investigation; validate account and source context.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "ssh-success",
+    "expected_verdict": "true_positive",
+    "expected_escalate": true,
+    "accepted_mitre_ids": [
+      "T1110.001",
+      "T1078"
+    ],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "A successful login follows repeated failures; verify the user and session.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "webshell-upload",
+    "expected_verdict": "true_positive",
+    "expected_escalate": true,
+    "accepted_mitre_ids": [
+      "T1505.003"
+    ],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "Verify file provenance and whether the script was executed.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "powershell-execution",
+    "expected_verdict": "true_positive",
+    "expected_escalate": true,
+    "accepted_mitre_ids": [
+      "T1059.001"
+    ],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "Review command line and parent process; authorization is not yet verified.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "privilege-escalation-attempt",
+    "expected_verdict": "true_positive",
+    "expected_escalate": true,
+    "accepted_mitre_ids": [
+      "T1068"
+    ],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "Review the initiating process and authorization trail.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "cron-persistence",
+    "expected_verdict": "true_positive",
+    "expected_escalate": true,
+    "accepted_mitre_ids": [
+      "T1053.003"
+    ],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "Inspect script provenance and execution evidence.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "phishing-credential-use",
+    "expected_verdict": "true_positive",
+    "expected_escalate": true,
+    "accepted_mitre_ids": [
+      "T1078"
+    ],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "Correlate supplied events and verify identity and session details.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "smb-lateral-movement",
+    "expected_verdict": "true_positive",
+    "expected_escalate": true,
+    "accepted_mitre_ids": [
+      "T1021.002"
+    ],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "Verify service-account scope and share access.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "exfiltration-spike",
+    "expected_verdict": "true_positive",
+    "expected_escalate": true,
+    "accepted_mitre_ids": [
+      "T1041"
+    ],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "Verify destination, content, and expected export activity.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "benign-admin-maintenance",
+    "expected_verdict": "benign",
+    "expected_escalate": false,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "The supplied approval matches the service restart; scope conclusions to this event.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "routine-package-update-draft",
+    "expected_verdict": "benign",
+    "expected_escalate": false,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "The record describes a signed update from the supplied example mirror.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "vulnerability-scanner-false-positive",
+    "expected_verdict": "false_positive",
+    "expected_escalate": false,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "Compare scan scope with the contemporaneous endpoint listener check.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "password-spray",
+    "expected_verdict": "true_positive",
+    "expected_escalate": true,
+    "accepted_mitre_ids": [
+      "T1110.003"
+    ],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "Check for later successful authentication outside this supplied window.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "prompt-injection-log",
+    "expected_verdict": "benign",
+    "expected_escalate": false,
+    "accepted_mitre_ids": [
+      "T1190"
+    ],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "Treat this text as untrusted event data; look for independent evidence.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "noisy-monitoring-tool",
+    "expected_verdict": "benign",
+    "expected_escalate": false,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "The supplied schedule and expected responses explain this burst.",
+    "answer_status": "draft - needs analyst review"
+  },
+  {
+    "id": "authorized-integrity-change",
+    "expected_verdict": "benign",
+    "expected_escalate": false,
+    "accepted_mitre_ids": [],
+    "hints": [
+      "Separate observed activity from intent and impact.",
+      "Identify useful missing evidence.",
+      "State a safe next step without claiming it has been performed."
+    ],
+    "explanation": "Match the changed file to the signed package transaction and supplied approval.",
+    "answer_status": "draft - needs analyst review"
+  }
+]

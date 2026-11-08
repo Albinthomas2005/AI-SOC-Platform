@@ -8,10 +8,6 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-# Load environment variables before importing the AI service so it sees the
-# configured model and credentials.
-load_dotenv()
-
 from flask import (
     Flask,
     jsonify,
@@ -19,6 +15,7 @@ from flask import (
 )
 
 from database import init_db, save_ai_analysis, set_ai_analysis_decision
+from training import register_training_routes
 from groq_service import (
     explain_alert,
     generate_investigation_report,
@@ -52,8 +49,11 @@ def handle_request_too_large(error):
         return jsonify(ok=False, error=message), 413
     return error
 
-# Initialize the local database.
-init_db()
+# Initialize the configured database when a request arrives. This keeps module
+# imports side-effect free, and lets tests safely substitute a temporary DB.
+@app.before_request
+def initialize_database_for_request():
+    init_db()
 
 
 def has_valid_internal_token():
@@ -70,6 +70,9 @@ def has_valid_internal_token():
             expected_token.encode("utf-8"),
         )
     )
+
+
+register_training_routes(app, has_valid_internal_token)
 
 
 @app.route("/api/ai/analyze-alert", methods=["POST"])
@@ -293,6 +296,8 @@ def record_analysis_decision(analysis_id):
 
 
 def run_app():
+    # Load local configuration only when starting the service, never on import.
+    load_dotenv()
     host = os.environ.get("SOC_AI_HOST", "127.0.0.1")
     port_value = os.environ.get("SOC_AI_PORT", "5000")
     allow_non_loopback = os.environ.get("SOC_AI_ALLOW_NON_LOOPBACK") == "true"
