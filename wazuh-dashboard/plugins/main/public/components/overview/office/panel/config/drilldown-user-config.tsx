@@ -16,7 +16,7 @@ import React from 'react';
 import { ViewMode } from '../../../../../../../../src/plugins/embeddable/public';
 import { getPlugins } from '../../../../../kibana-services';
 import { DashboardPanelState } from '../../../../../../../../src/plugins/dashboard/public/application';
-import { EmbeddableInput } from '../../../../../../../../src/plugins/embeddable/public';
+import { EmbeddableInput } from 'src/plugins/embeddable/public';
 import {
   getVisStateOfficeAlertsEvolutionByUser,
   getVisStateOfficeClientIPOperationLevelTable,

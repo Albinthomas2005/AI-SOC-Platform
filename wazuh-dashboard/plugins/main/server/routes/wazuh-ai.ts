@@ -54,4 +54,25 @@ export function WazuhAiRoutes(router: IRouter) {
     (context, request, response) =>
       ctrl.generateReport(context, request, response),
   );
+
+  router.post(
+    {
+      path: '/api/ai/analysis/decision',
+      validate: {
+        body: schema.object({
+          analysis_id: schema.string(),
+          decision: schema.string(),
+          note: schema.maybe(schema.string()),
+          edited_analysis: schema.maybe(schema.string()),
+        }),
+      },
+      options: {
+        body: {
+          maxBytes: MAX_AI_ALERT_BYTES,
+        },
+      },
+    },
+    (context, request, response) =>
+      ctrl.recordAnalysisDecision(context, request, response),
+  );
 }

@@ -60,7 +60,10 @@ describe('AiSocDashboard', () => {
     (WzRequest.genericReq as jest.Mock).mockResolvedValue({
       data: {
         ok: true,
+        analysis_id: '0123456789abcdef0123456789abcdef',
         status: 'ai_generated_unverified',
+        decision: 'unreviewed',
+        decision_label: 'AI draft - not reviewed',
         report: '## Assessment\n\nSynthetic report draft',
       },
     });
@@ -71,12 +74,48 @@ describe('AiSocDashboard', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Synthetic report draft')).toBeInTheDocument();
     expect(
-      screen.getByText('AI-generated report — unverified'),
+      screen.getByText('AI draft - not reviewed'),
     ).toBeInTheDocument();
     expect(WzRequest.genericReq).toHaveBeenCalledWith(
       'POST',
       '/api/ai/generate-report',
       { index: data.recentAlerts[0].index, id: data.recentAlerts[0].id },
+      { shouldRetry: false, checkCurrentApiIsUp: false },
+    );
+  });
+  it('saves an analyst approval for the generated report', async () => {
+    (WzRequest.genericReq as jest.Mock)
+      .mockResolvedValueOnce({
+        data: {
+          ok: true,
+          analysis_id: '0123456789abcdef0123456789abcdef',
+          status: 'ai_generated_unverified',
+          decision: 'unreviewed',
+          decision_label: 'AI draft - not reviewed',
+          report: 'Synthetic draft',
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          ok: true,
+          analysis_id: '0123456789abcdef0123456789abcdef',
+          decision: 'approved',
+          decided_at: '2026-11-07T10:00:00Z',
+        },
+      });
+    render(<AiSocDashboard />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    expect(await screen.findByText('Analyst decision: approved')).toBeInTheDocument();
+    expect(WzRequest.genericReq).toHaveBeenLastCalledWith(
+      'POST',
+      '/api/ai/analysis/decision',
+      {
+        analysis_id: '0123456789abcdef0123456789abcdef',
+        decision: 'approved',
+        note: '',
+      },
       { shouldRetry: false, checkCurrentApiIsUp: false },
     );
   });

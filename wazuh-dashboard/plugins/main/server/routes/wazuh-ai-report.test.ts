@@ -53,7 +53,11 @@ describe('POST /api/ai/generate-report controller', () => {
       statusCode: 200,
       body: {
         ok: true,
+        analysis_id: '0123456789abcdef0123456789abcdef',
         status: 'ai_generated_unverified',
+        decision: 'unreviewed',
+        decision_label: 'AI draft - not reviewed',
+        decided_at: null,
         evidence: {
           index,
           id,
@@ -140,5 +144,42 @@ describe('POST /api/ai/generate-report controller', () => {
     );
     expect(result.statusCode).toBe(403);
     expect(needle).not.toHaveBeenCalled();
+  });
+
+  it('forwards analyst decisions to the protected backend endpoint', async () => {
+    needle.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        ok: true,
+        analysis_id: '0123456789abcdef0123456789abcdef',
+        decision: 'approved',
+        decision_label: 'Analyst approved',
+        decided_at: '2026-11-07T10:00:00Z',
+        note: 'Reviewed synthetic evidence',
+      },
+    });
+    const result = await controller.recordAnalysisDecision(
+      createContext(),
+      {
+        body: {
+          analysis_id: '0123456789abcdef0123456789abcdef',
+          decision: 'approved',
+          note: 'Reviewed synthetic evidence',
+        },
+      } as any,
+      createResponse() as any,
+    );
+
+    expect(result.body).toEqual(
+      expect.objectContaining({ ok: true, decision: 'approved' }),
+    );
+    expect(needle.mock.calls[0][1]).toBe(
+      'http://127.0.0.1:5000/api/ai/analysis/0123456789abcdef0123456789abcdef/decision',
+    );
+    expect(needle.mock.calls[0][2]).toEqual({
+      decision: 'approved',
+      note: 'Reviewed synthetic evidence',
+      edited_analysis: undefined,
+    });
   });
 });

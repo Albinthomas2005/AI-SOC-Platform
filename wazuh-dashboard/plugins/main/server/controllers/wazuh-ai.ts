@@ -30,6 +30,12 @@ type NeedleResponse = {
     status?: unknown;
     evidence?: unknown;
     report?: unknown;
+    analysis_id?: unknown;
+    decision?: unknown;
+    decision_label?: unknown;
+    decided_at?: unknown;
+    note?: unknown;
+    edited_analysis?: unknown;
   };
 };
 
@@ -46,6 +52,7 @@ const needle = require('needle') as NeedlePost;
 
 const AI_SERVICE_URL = 'http://127.0.0.1:5000/api/ai/analyze-alert';
 const AI_REPORT_SERVICE_URL = 'http://127.0.0.1:5000/api/ai/generate-report';
+const AI_DECISION_SERVICE_URL = 'http://127.0.0.1:5000/api/ai/analysis';
 const MAX_AI_REPORT_NOTES_CHARS = 4000;
 const MAX_AI_ALERT_BYTES = 256 * 1024;
 const AI_SERVICE_TIMEOUT_MS = 45000;
@@ -501,6 +508,10 @@ export class WazuhAiCtrl {
         upstream.statusCode >= 300 ||
         upstream.body?.ok !== true ||
         upstream.body.status !== 'ai_generated_unverified' ||
+        typeof upstream.body.analysis_id !== 'string' ||
+        !/^[0-9a-f]{32}$/.test(upstream.body.analysis_id) ||
+        upstream.body.decision !== 'unreviewed' ||
+        upstream.body.decision_label !== 'AI draft - not reviewed' ||
         upstreamEvidence?.index !== index ||
         upstreamEvidence?.id !== id ||
         !upstreamAlert ||
@@ -520,9 +531,13 @@ export class WazuhAiCtrl {
       return response.ok({
         body: {
           ok: true,
+          analysis_id: upstream.body.analysis_id,
           status: 'ai_generated_unverified',
           evidence: upstreamEvidence,
           report: upstream.body.report,
+          decision: upstream.body.decision,
+          decision_label: upstream.body.decision_label,
+          decided_at: upstream.body.decided_at,
         },
       });
     } catch {
@@ -532,6 +547,111 @@ export class WazuhAiCtrl {
           ok: false,
           error: 'AI report generation is temporarily unavailable',
         },
+      });
+    }
+  }
+
+  async recordAnalysisDecision(
+    context: RequestHandlerContext,
+    request: OpenSearchDashboardsRequest,
+    response: OpenSearchDashboardsResponseFactory,
+  ) {
+    try {
+      const currentUser = await context.wazuh.security.getCurrentUser(
+        request,
+        context,
+      );
+      if (!currentUser || typeof currentUser.username !== 'string') {
+        return response.custom({
+          statusCode: 401,
+          body: { ok: false, error: 'Authentication required' },
+        });
+      }
+    } catch {
+      return response.custom({
+        statusCode: 401,
+        body: { ok: false, error: 'Authentication required' },
+      });
+    }
+
+    const body = request.body || {};
+    const { analysis_id: analysisId, decision, note, edited_analysis: editedAnalysis } = body;
+    if (
+      typeof analysisId !== 'string' ||
+      !/^[0-9a-f]{32}$/.test(analysisId) ||
+      !['approved', 'edited', 'rejected'].includes(decision) ||
+      (note !== undefined && (typeof note !== 'string' || note.length > 4000)) ||
+      (decision === 'edited' &&
+        (typeof editedAnalysis !== 'string' ||
+          !editedAnalysis.trim() ||
+          editedAnalysis.length > 65536)) ||
+      (decision !== 'edited' && editedAnalysis !== undefined)
+    ) {
+      return response.custom({
+        statusCode: 400,
+        body: { ok: false, error: 'Invalid analyst decision' },
+      });
+    }
+
+    const internalToken = process.env.SOC_AI_INTERNAL_TOKEN;
+    if (!internalToken) {
+      return response.custom({
+        statusCode: 503,
+        body: { ok: false, error: 'Saving the analyst decision is unavailable' },
+      });
+    }
+
+    try {
+      const upstream = await needle(
+        'post',
+        `${AI_DECISION_SERVICE_URL}/${analysisId}/decision`,
+        { decision, note, edited_analysis: editedAnalysis },
+        {
+          json: true,
+          headers: { Authorization: `Bearer ${internalToken}` },
+          // eslint-disable-next-line camelcase
+          open_timeout: AI_SERVICE_TIMEOUT_MS,
+          // eslint-disable-next-line camelcase
+          response_timeout: AI_SERVICE_TIMEOUT_MS,
+          // eslint-disable-next-line camelcase
+          read_timeout: AI_SERVICE_TIMEOUT_MS,
+        },
+      );
+      if (
+        typeof upstream.statusCode !== 'number' ||
+        upstream.statusCode < 200 ||
+        upstream.statusCode >= 300 ||
+        upstream.body?.ok !== true ||
+        upstream.body.analysis_id !== analysisId ||
+        upstream.body.decision !== decision ||
+        typeof upstream.body.decided_at !== 'string'
+      ) {
+        return response.custom({
+          statusCode: upstream.statusCode === 404 ? 404 : 503,
+          body: {
+            ok: false,
+            error:
+              upstream.statusCode === 404
+                ? 'Analysis was not found'
+                : 'Saving the analyst decision is unavailable',
+          },
+        });
+      }
+      return response.ok({
+        body: {
+          ok: true,
+          analysis_id: analysisId,
+          decision,
+          decision_label: upstream.body.decision_label,
+          note: upstream.body.note,
+          decided_at: upstream.body.decided_at,
+          edited_analysis: upstream.body.edited_analysis,
+        },
+      });
+    } catch {
+      return response.custom({
+        statusCode: 503,
+        body: { ok: false, error: 'Saving the analyst decision is unavailable' },
       });
     }
   }

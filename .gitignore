@@ -5,6 +5,10 @@
 *.pem
 *.key
 *password*
+# Exact source-code exceptions; other password/credential files remain ignored.
+!wazuh-dashboard/plugins/main/public/components/common/form/input-password.tsx
+!wazuh-dashboard/plugins/main/public/components/endpoints-summary/register-agent/services/wazuh-password-service.ts
+!wazuh-dashboard/plugins/main/public/components/endpoints-summary/register-agent/services/wazuh-password-service.test.ts
 *secret*
 *credential*
 
@@ -39,3 +43,7 @@ backups/
 
 # Locally captured evaluation responses (may contain sensitive analysis text)
 eval-responses/
+
+# Downloaded build artifacts, install backups and copied CI logs
+dist/
+failed-log.txt

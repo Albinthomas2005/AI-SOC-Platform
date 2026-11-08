@@ -1,4 +1,4 @@
-import { SavedVis } from '../types';
+import { SavedVis } from '../../../components/overview/it-hygiene/common/types';
 
 export function createSearchSource(
   indexPatternId: string,

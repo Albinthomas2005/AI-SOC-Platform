@@ -12,7 +12,7 @@
  */
 
 import { EuiPanel, EuiTitle, EuiBasicTableColumn, EuiInMemoryTable } from '@elastic/eui';
-import { SearchResponse, IndexPattern } from '../../../../../../src/core/server';
+import { SearchResponse, IndexPattern } from 'src/core/server';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { search } from '../../../search-bar/search-bar-service';
 import { tFilter } from '../../../data-source';

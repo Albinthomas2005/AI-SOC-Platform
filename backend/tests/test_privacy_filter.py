@@ -197,6 +197,16 @@ class TestPrivacyFilter(unittest.TestCase):
         ):
             self.assertIn(token, strict)
 
+    def test_default_mode_does_not_remove_hostnames_usernames_urls_macs_or_paths(self):
+        value = (
+            "host=ws-23.corp.example user=alice "
+            "url=https://srv.internal.local/a mac=02:00:5e:10:00:00 "
+            "path=/home/alice/case.txt"
+        )
+        result = sanitize_text(value)
+
+        self.assertEqual(result, value)
+
     def test_recursively_sanitizes_nested_data(self):
         alert = {
             "data": {
