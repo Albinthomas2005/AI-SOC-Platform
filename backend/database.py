@@ -1,4 +1,5 @@
 
+import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -54,6 +55,25 @@ def init_db():
                 decision_note TEXT,
                 decided_at TEXT,
                 edited_text TEXT
+            )
+        """)
+
+        # Training attempts are isolated from AI reports and contain only the
+        # analyst's submission and deterministic score. Scenario answer keys
+        # are deliberately never copied into this database.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS training_attempts (
+                attempt_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                scenario_id TEXT NOT NULL,
+                submitted_at TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                escalate INTEGER NOT NULL CHECK (escalate IN (0, 1)),
+                mitre_ids_json TEXT NOT NULL,
+                invalid_mitre_ids_json TEXT NOT NULL,
+                report_text TEXT NOT NULL,
+                time_spent INTEGER NOT NULL,
+                score_json TEXT NOT NULL
             )
         """)
 
@@ -124,6 +144,32 @@ def get_ai_analysis(analysis_id):
     with closing(get_connection()) as connection, connection:
         return connection.execute(
             "SELECT * FROM ai_analyses WHERE analysis_id = ?", (analysis_id,)
+        ).fetchone()
+
+
+def save_training_attempt(attempt):
+    """Persist analyst work and score only; never accept an answer key."""
+    with closing(get_connection()) as connection, connection:
+        connection.execute(
+            """INSERT INTO training_attempts
+                (attempt_id, user_id, scenario_id, submitted_at, verdict,
+                 escalate, mitre_ids_json, invalid_mitre_ids_json, report_text,
+                 time_spent, score_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                attempt["attempt_id"], attempt["user_id"], attempt["scenario_id"],
+                attempt["submitted_at"], attempt["verdict"],
+                int(attempt["escalate"]), json.dumps(attempt["mitre_ids"]),
+                json.dumps(attempt["invalid_mitre_ids"]), attempt["report_text"],
+                attempt["time_spent"], json.dumps(attempt["score"]),
+            ),
+        )
+
+
+def get_training_attempt(attempt_id):
+    with closing(get_connection()) as connection, connection:
+        return connection.execute(
+            "SELECT * FROM training_attempts WHERE attempt_id = ?", (attempt_id,)
         ).fetchone()
 
 
