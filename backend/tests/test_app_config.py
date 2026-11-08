@@ -20,6 +20,15 @@ class TestAppRunConfiguration(unittest.TestCase):
 
         run.assert_called_once_with(host="127.0.0.1", port=5123, debug=False)
 
+    def test_invalid_port_is_rejected_before_server_starts(self):
+        with patch.dict(os.environ, {"SOC_AI_PORT": "not-a-port"}, clear=True), patch(
+            "app.app.run"
+        ) as run:
+            with self.assertRaisesRegex(SystemExit, "SOC_AI_PORT must be an integer"):
+                run_app()
+
+        run.assert_not_called()
+
     def test_non_loopback_host_is_refused_without_override(self):
         with patch.dict(
             os.environ, {"SOC_AI_HOST": "192.0.2.10"}, clear=True

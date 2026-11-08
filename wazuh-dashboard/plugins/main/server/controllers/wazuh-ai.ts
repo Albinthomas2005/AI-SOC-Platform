@@ -50,9 +50,7 @@ type NeedlePost = (
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const needle = require('needle') as NeedlePost;
 
-const AI_SERVICE_BASE_URL =
-  process.env.SOC_AI_BASE_URL ||
-  `http://${process.env.SOC_AI_HOST || '127.0.0.1'}:${process.env.SOC_AI_PORT || '5000'}`;
+const AI_SERVICE_BASE_URL = `http://${process.env.SOC_AI_HOST || '127.0.0.1'}:${process.env.SOC_AI_PORT || '5000'}`;
 const AI_SERVICE_URL = `${AI_SERVICE_BASE_URL}/api/ai/analyze-alert`;
 const AI_REPORT_SERVICE_URL = `${AI_SERVICE_BASE_URL}/api/ai/generate-report`;
 const AI_DECISION_SERVICE_URL = `${AI_SERVICE_BASE_URL}/api/ai/analysis`;

@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,7 @@ from unittest.mock import Mock
 
 from scripts.run_eval import (
     evaluate_response,
+    main,
     markdown_report,
     read_internal_token,
     run_scenario,
@@ -123,25 +125,54 @@ class TestEvaluationChecks(unittest.TestCase):
         self.assertFalse(checks["keywords"])
         self.assertFalse(checks["overall"])
 
-    def test_token_reader_returns_value_without_printing_it(self):
-        from pathlib import Path
-        from tempfile import TemporaryDirectory
+    def test_token_reader_uses_environment_without_printing_it(self):
         from contextlib import redirect_stdout
         from io import StringIO
 
-        with TemporaryDirectory() as temp_dir:
-            env_file = Path(temp_dir) / ".env"
-            env_file.write_text(
-                "GROQ_API_KEY=synthetic-key-placeholder\n"
-                "SOC_AI_INTERNAL_TOKEN=synthetic-token-value\n",
-                encoding="utf-8",
-            )
+        with patch.dict(os.environ, {"SOC_AI_INTERNAL_TOKEN": "synthetic-token-value"}, clear=True):
             output = StringIO()
             with redirect_stdout(output):
-                token = read_internal_token(env_file)
-
+                token = read_internal_token()
         self.assertEqual(token, "synthetic-token-value")
         self.assertEqual(output.getvalue(), "")
+
+    def test_cli_uses_environment_and_writes_docs_evaluation_results(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from scripts import run_eval
+
+        result = {
+            "scenario": "SYNTHETIC: CLI test",
+            "checks": {"api": True, "mitre": None, "keywords": True, "claims": True, "overall": True},
+            "mitre_in_input": False,
+            "duration_ms": 1,
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "EVALUATION_RESULTS.md"
+            with patch.dict(os.environ, {
+                "SOC_AI_INTERNAL_TOKEN": "synthetic-token",
+                "GROQ_API_KEY": "synthetic-groq-key",
+                "SOC_AI_PORT": "5123",
+            }, clear=True), patch.object(run_eval, "REPORT_FILE", report_path), patch.object(
+                run_eval, "load_scenarios", return_value=[{"name": "SYNTHETIC: CLI test"}]
+            ), patch.object(run_eval, "run_scenarios", return_value=[result]) as run:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main([]), 0)
+
+            run.assert_called_once_with(
+                [{"name": "SYNTHETIC: CLI test"}], "synthetic-token", 5123, 0, None
+            )
+            self.assertIn("SYNTHETIC: CLI test", report_path.read_text(encoding="utf-8"))
+
+    def test_cli_requires_groq_key_from_environment(self):
+        from contextlib import redirect_stderr
+        from io import StringIO
+
+        with patch.dict(os.environ, {"SOC_AI_INTERNAL_TOKEN": "synthetic-token"}, clear=True):
+            with redirect_stderr(StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    main([])
+        self.assertEqual(error.exception.code, 2)
 
     def test_mitre_from_input_is_reported_but_not_counted_in_overall(self):
         scenario = {

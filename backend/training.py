@@ -18,7 +18,7 @@ from groq_service import (
     coach_training_report,
     coach_shift_handover,
 )
-from privacy_filter import new_privacy_context, minimize_report_evidence
+from privacy_filter import new_privacy_context, minimize_report_evidence, sanitize_text
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "datasets" / "training"
 VISIBLE_PATH = DATA_DIR / "scenarios.json"
@@ -322,7 +322,8 @@ def register_training_routes(app, has_valid_token):
             return jsonify(ok=False, error="Invalid unscored attempt"), 400
         scenario = {"id": case_id, "title": "Imported Wazuh alert", "alert": json.loads(case["alert_json"]), "evidence": {"log_lines": [], "context_notes": []}}
         try:
-            coaching = coach_training_report(payload["report_text"], scenario, "No answer key is available. Provide report-writing coaching only; do not score or infer a correct verdict.")
+            safe_report = sanitize_text(payload["report_text"], new_privacy_context())
+            coaching = coach_training_report(safe_report, scenario, "No answer key is available. Provide report-writing coaching only; do not score or infer a correct verdict.")
         except InvalidAIResponse as error:
             return jsonify(ok=False, error=f"AI coaching response failed validation: {error}"), 502
         except GroqUnavailable:
@@ -424,7 +425,8 @@ def register_training_routes(app, has_valid_token):
         if scenario is None or key is None:
             return jsonify(ok=False, error="Attempt not found"), 404
         try:
-            coaching = coach_training_report(attempt["report_text"], scenario, key["explanation"])
+            safe_report = sanitize_text(attempt["report_text"], new_privacy_context())
+            coaching = coach_training_report(safe_report, scenario, key["explanation"])
         except InvalidAIResponse as error:
             return jsonify(ok=False, error=f"AI coaching response failed validation: {error}"), 502
         except GroqUnavailable:
@@ -580,8 +582,9 @@ def register_training_routes(app, has_valid_token):
             return jsonify(ok=False, error="Completed shift not found"), 404
         if not isinstance(note, str) or not note.strip() or len(note) > 5000:
             return jsonify(ok=False, error="Handover note must be between 1 and 5000 characters"), 400
+        safe_note = sanitize_text(note.strip(), new_privacy_context())
         try:
-            coaching = coach_shift_handover(note.strip())
+            coaching = coach_shift_handover(safe_note)
         except InvalidAIResponse as error:
             return jsonify(ok=False, error=f"Handover coaching response failed validation: {error}"), 502
         except GroqUnavailable:

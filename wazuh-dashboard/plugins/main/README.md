@@ -9,7 +9,8 @@ manage the configuration and capabilities of the Wazuh server.
 ### SOC AI analysis runtime prerequisite
 
 The optional AI analysis server route forwards alerts to the local SOC AI
-service at `http://127.0.0.1:5000/api/ai/analyze-alert`. The Python service
+service at `http://127.0.0.1:<SOC_AI_PORT>/api/ai/analyze-alert` (default
+port `5000`). The Python service
 must be running in the same host or network namespace as the Wazuh Dashboard
 server, and `SOC_AI_INTERNAL_TOKEN` must be configured in the Dashboard server
 process environment to match the Python service. The token is sent only from

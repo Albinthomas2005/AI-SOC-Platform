@@ -100,14 +100,16 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
 
 ## Project status
 
-| Done | Pending |
+| Implemented | Pending |
 |---|---|
-| Training routes and client-side Markdown export are implemented; smoke checks were not run for this task. | Review the 16 draft answer keys with analysts. |
-| Backend suite: 110 tests passed for this cherry-pick task, using temporary databases and mocked providers. | Rerun the synthetic evaluation and review its results. |
-| Backend runner and training endpoint smoke script are in place; the smoke script was not run for this task. | Capture real Training Mode screenshots under `docs/screenshots/`. |
-| `git diff --check` passed for this task. | Build and install the Dashboard plugin in its pinned environment; not run for this task. |
+| Backend alert analysis, report generation, analyst decisions, training, and shifts; backend tests use temporary databases and mocked providers. | Browser test and Dashboard plugin build; the selected-alert review test is written, not run. |
+| Selected-alert review now connects report generation and Edit/Approve/Reject actions to backend SQLite decisions. | Screenshots and analyst review of the 16 draft answer keys. |
+| Backend, Dashboard server, scripts, and evaluator use `SOC_AI_PORT` (default `5000`). | Live evaluation; the CLI and report path have only been checked with mocks. |
+| Evaluation CLI reads `GROQ_API_KEY` and `SOC_AI_INTERNAL_TOKEN` from the process environment and targets `docs/EVALUATION_RESULTS.md`. | Event correlation, incident management, threat intelligence integration, AI threat hunting, and production readiness. |
 
-Live provider behavior and the Dashboard UI were not verified in this task.
+For this stabilization task, the backend suite passed **118 tests** and
+`git diff --check` passed. The smoke script, browser UI, plugin build, live
+provider behavior, and live evaluation were not run.
 
 ## Training Mode
 
@@ -194,9 +196,11 @@ same value in the trusted Wazuh Dashboard service environment. Do not paste
 either secret into source control, logs, the browser, or this repository.
 `backend/.env.example` and the root `.env.example` contain placeholders only.
 
-The backend defaults to `127.0.0.1:5000`. `SOC_AI_HOST` accepts loopback values
-by default; non-loopback binding requires `SOC_AI_ALLOW_NON_LOOPBACK=true` and
-separate network controls. Do not expose port 5000 to the network.
+The backend defaults to `127.0.0.1:5000`. `SOC_AI_PORT` sets the port used by
+the Flask service, Dashboard server, scripts, and evaluator. `SOC_AI_HOST` accepts
+loopback values by default; non-loopback binding requires
+`SOC_AI_ALLOW_NON_LOOPBACK=true` and separate network controls. Do not expose
+the backend port to the network.
 
 Start the backend from `backend/`:
 
@@ -221,17 +225,17 @@ The root workflow [`.github/workflows/backend-tests.yml`](.github/workflows/back
 runs the same command on pushes and pull requests to `main`, with Python 3.12.
 The separate plugin build workflow is manually dispatched.
 
-With the backend running and `SOC_AI_INTERNAL_TOKEN` set in `backend/.env`,
-run the synthetic evaluation from `backend/`:
+With the backend running and `GROQ_API_KEY` plus `SOC_AI_INTERNAL_TOKEN`
+exported in its process environment, run the synthetic evaluation from `backend/`:
 
 ```bash
 python scripts/run_eval.py --delay 1 --save-responses eval-responses
 ```
 
-The harness writes its summary to `documentation/evaluation.md`. Saved
+The harness writes its summary to `docs/EVALUATION_RESULTS.md`. Saved
 response bodies may contain sanitized but identifying context; keep them
-local. The `eval-responses/` directory is ignored by Git. No evaluation was
-run for the current prompt/schema changes.
+local. The `eval-responses/` directory is ignored by Git. The live evaluation
+was not run for this stabilization task.
 
 ## Dashboard plugin build and installation
 

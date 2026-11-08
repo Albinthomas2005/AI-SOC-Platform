@@ -436,6 +436,71 @@ class TestGenerateReportAPI(unittest.TestCase):
             response = self.post_report()
         self.assertEqual(response.status_code, 401)
 
+    def test_every_report_route_rejects_unauthenticated_requests(self):
+        import re
+
+        routes = [rule for rule in app.url_map.iter_rules() if rule.rule.startswith("/api/ai/")]
+        self.assertTrue(routes)
+        for route in routes:
+            path = re.sub(r"<[^>]+>", "a" * 32, route.rule)
+            method = "GET" if "GET" in route.methods else "POST"
+            with self.subTest(method=method, path=path):
+                response = self.client.open(path, method=method, json={})
+                self.assertEqual(response.status_code, 401)
+
+    def test_generated_report_decisions_flow_to_sqlite(self):
+        import database
+
+        with patch("app.generate_investigation_report", return_value="Synthetic draft"):
+            for decision in ("approved", "edited", "rejected"):
+                generated = self.post_report().get_json()
+                payload = {"decision": decision, "note": f"Reviewed as {decision}."}
+                if decision == "edited":
+                    payload["edited_analysis"] = "Analyst-edited report"
+                saved = self.client.post(
+                    f"/api/ai/analysis/{generated['analysis_id']}/decision",
+                    json=payload,
+                    headers=self.headers,
+                )
+
+                self.assertEqual(saved.status_code, 200)
+                stored = database.get_ai_analysis(generated["analysis_id"])
+                self.assertEqual(stored["decision"], decision)
+                self.assertEqual(stored["decision_note"], f"Reviewed as {decision}.")
+                self.assertEqual(
+                    stored["edited_text"],
+                    "Analyst-edited report" if decision == "edited" else None,
+                )
+
+    def test_secrets_tokens_and_obvious_pii_are_removed_before_report_provider(self):
+        import json
+
+        payload = json.loads(json.dumps(self.payload))
+        payload["evidence"]["alert"]["rule"]["description"] = (
+            "Contact analyst@example.invalid; Bearer synthetic-bearer-token; "
+            "access_token=synthetic-access-token; password=synthetic-password; "
+            "public IP 8.8.8.8"
+        )
+        payload["analyst_notes"] = (
+            "Email analyst@example.invalid, token Bearer synthetic-note-token, "
+            "API_KEY=synthetic-api-key, IP 203.0.113.8"
+        )
+        with patch("app.generate_investigation_report", return_value="Synthetic draft") as provider:
+            response = self.post_report(payload)
+
+        self.assertEqual(response.status_code, 200)
+        provider_input = json.dumps(provider.call_args.args)
+        for value in (
+            "analyst@example.invalid", "synthetic-bearer-token",
+            "synthetic-access-token", "synthetic-password", "synthetic-note-token",
+            "synthetic-api-key", "8.8.8.8", "203.0.113.8",
+        ):
+            self.assertNotIn(value, provider_input)
+        self.assertIn("[REDACTED_EMAIL]", provider_input)
+        self.assertIn("[REDACTED_TOKEN]", provider_input)
+        self.assertIn("[REDACTED_SECRET]", provider_input)
+        self.assertIn("[REDACTED_PUBLIC_IP]", provider_input)
+
     def test_invalid_payloads_are_rejected(self):
         invalid = [
             {},

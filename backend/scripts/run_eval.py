@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import re
 import time
 import urllib.error
@@ -14,23 +15,15 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPOSITORY_ROOT = BACKEND_DIR.parent
 SCENARIOS_FILE = REPOSITORY_ROOT / "datasets" / "simulated-alerts" / "scenarios.json"
-REPORT_FILE = REPOSITORY_ROOT / "documentation" / "evaluation.md"
+REPORT_FILE = REPOSITORY_ROOT / "docs" / "EVALUATION_RESULTS.md"
 
 
-def read_internal_token(env_file=BACKEND_DIR / ".env"):
-    """Read the internal token without writing it to stdout or logs."""
-    try:
-        lines = env_file.read_text(encoding="utf-8").splitlines()
-    except OSError as error:
-        raise ValueError("backend/.env is missing or unreadable") from error
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("SOC_AI_INTERNAL_TOKEN="):
-            token = stripped.partition("=")[2].strip().strip("\"'")
-            if token:
-                return token
-    raise ValueError("SOC_AI_INTERNAL_TOKEN is missing from backend/.env")
+def read_internal_token():
+    """Read the backend token from the process environment, never a file."""
+    token = os.environ.get("SOC_AI_INTERNAL_TOKEN", "").strip()
+    if not token:
+        raise ValueError("SOC_AI_INTERNAL_TOKEN is missing from the environment")
+    return token
 
 
 def evaluate_response(response, scenario):
@@ -150,7 +143,8 @@ def markdown_report(results):
     return "\n".join(rows)
 
 
-def write_report(results, path=REPORT_FILE):
+def write_report(results, path=None):
+    path = REPORT_FILE if path is None else path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(markdown_report(results), encoding="utf-8")
 
@@ -216,7 +210,7 @@ def run_scenarios(scenarios, token, port, delay=0, save_responses_dir=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--port", type=int, default=os.environ.get("SOC_AI_PORT", "5000"))
     parser.add_argument("--save-responses", type=Path, metavar="DIR")
     parser.add_argument("--delay", type=float, default=0, metavar="SECONDS")
     args = parser.parse_args(argv)
@@ -226,6 +220,8 @@ def main(argv=None):
         parser.error("--delay must be non-negative")
 
     try:
+        if not os.environ.get("GROQ_API_KEY", "").strip():
+            raise ValueError("GROQ_API_KEY is missing from the environment")
         token = read_internal_token()
         scenarios = load_scenarios()
     except ValueError as error:
@@ -239,7 +235,7 @@ def main(argv=None):
         args.save_responses,
     )
     write_report(results)
-    print(f"Wrote evaluation results for {len(results)} synthetic scenarios to documentation/evaluation.md")
+    print(f"Wrote evaluation results for {len(results)} synthetic scenarios to {REPORT_FILE}")
     print(f"Passed: {sum(result['checks']['overall'] for result in results)}/{len(results)}")
     return 0 if all(result["checks"]["overall"] for result in results) else 1
 
