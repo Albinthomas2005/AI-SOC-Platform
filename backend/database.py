@@ -202,6 +202,24 @@ def init_db():
                     ON DELETE CASCADE
             )
         """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS threat_intel_cache (
+                provider TEXT NOT NULL,
+                ioc_type TEXT NOT NULL,
+                ioc_value TEXT NOT NULL,
+                cached_at INTEGER NOT NULL,
+                response_json TEXT NOT NULL,
+                PRIMARY KEY (provider, ioc_type, ioc_value)
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS threat_intel_rate_limit (
+                provider TEXT NOT NULL,
+                window_start INTEGER NOT NULL,
+                request_count INTEGER NOT NULL,
+                PRIMARY KEY (provider, window_start)
+            )
+        """)
 
 
 def add_alert(timestamp, severity, rule, source_ip, status="New"):

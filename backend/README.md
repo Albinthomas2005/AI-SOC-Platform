@@ -215,6 +215,19 @@ record validated workflow changes. `GET /api/incidents/<id>/report` returns a
 Markdown report. Allowed statuses are New, Investigating, Escalated, Contained,
 Resolved, and Closed; transitions are validated and Closed is terminal.
 
+## Threat-intel API
+
+`POST /api/threat-intel/lookup` accepts an alert object or incident ID and
+requires the internal bearer token. It extracts public IPs, public domains,
+URLs, and hashes. Private/non-global IPs, internal hostnames, URL credentials,
+queries, and fragments are excluded. VirusTotal and AbuseIPDB adapters read
+`VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` from the process environment;
+these keys must not be sent by a request or stored in source. Results are
+cached in SQLite, and each provider has a configurable per-minute request
+limit. Only returned provider data is included in the AI summary prompt; when
+there is no returned data, the API says so without calling the AI provider.
+HTTP behavior is covered with mocks; no live provider request has been run.
+
 ## Security notes
 
 - Never commit API keys, passwords, private keys, databases, or real security logs.

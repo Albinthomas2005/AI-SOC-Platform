@@ -4,6 +4,7 @@ import json
 import os
 import re
 import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -14,10 +15,16 @@ from flask import (
     request,
 )
 
-from database import init_db, save_ai_analysis, set_ai_analysis_decision
+from database import get_connection, init_db, save_ai_analysis, set_ai_analysis_decision
 from training import register_training_routes
 from correlation import correlate_alerts
 from incidents import register_incident_routes
+from threat_intel import (
+    RateLimitExceeded,
+    extract_iocs,
+    lookup_iocs,
+    summarize_threat_intel,
+)
 from groq_service import (
     explain_alert,
     generate_investigation_report,
@@ -77,6 +84,47 @@ def has_valid_internal_token():
 
 register_training_routes(app, has_valid_internal_token)
 register_incident_routes(app, has_valid_internal_token)
+
+
+@app.route("/api/threat-intel/lookup", methods=["POST"])
+def threat_intel_lookup_api():
+    if not has_valid_internal_token():
+        return jsonify(ok=False, error="Authentication required"), 401
+    if not request.is_json:
+        return jsonify(ok=False, error="A JSON threat-intel request is required"), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) not in ({"alert"}, {"incident_id"}):
+        return jsonify(ok=False, error="Provide one alert or incident_id"), 400
+
+    if "alert" in payload:
+        if not isinstance(payload["alert"], dict):
+            return jsonify(ok=False, error="alert must be an object"), 400
+        source = payload["alert"]
+    else:
+        incident_id = payload["incident_id"]
+        if not isinstance(incident_id, str) or not re.fullmatch(r"[0-9a-f]{32}", incident_id):
+            return jsonify(ok=False, error="Invalid incident ID"), 400
+        with closing(get_connection()) as connection, connection:
+            rows = connection.execute(
+                """SELECT evidence_json FROM incident_evidence
+                   WHERE incident_id = ? ORDER BY ordinal""", (incident_id,)
+            ).fetchall()
+        if not rows:
+            return jsonify(ok=False, error="Incident was not found or has no evidence"), 404
+        source = [json.loads(row["evidence_json"]) for row in rows]
+
+    iocs = extract_iocs(source)[:100]
+    try:
+        results = lookup_iocs(iocs) if iocs else []
+    except RateLimitExceeded:
+        return jsonify(ok=False, error="Threat-intel provider rate limit exceeded"), 429
+    summary = summarize_threat_intel(results)
+    return jsonify(
+        ok=True,
+        iocs=iocs,
+        results=results,
+        summary=summary,
+    )
 
 
 @app.route("/api/correlations", methods=["POST"])
