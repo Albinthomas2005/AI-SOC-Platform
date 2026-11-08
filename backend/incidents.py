@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from flask import jsonify, request
 
+import database
 from database import get_connection
 from privacy_filter import new_privacy_context, sanitize_alert
 
@@ -157,7 +158,7 @@ def register_incident_routes(app, auth_check):
         if not request.is_json:
             return jsonify(ok=False, error="A JSON incident request is required"), 400
         payload = request.get_json(silent=True)
-        allowed = {"alerts", "correlation_group", "title", "category", "actor"}
+        allowed = {"alerts", "correlation_group", "title", "category"}
         if not isinstance(payload, dict) or set(payload) - allowed:
             return jsonify(ok=False, error="Invalid incident request"), 400
         has_alerts = "alerts" in payload
@@ -182,7 +183,7 @@ def register_incident_routes(app, auth_check):
         title = payload.get("title", "Incident")
         category = payload.get("category", "")
         try:
-            actor = _clean_actor(payload.get("actor"))
+            actor = _clean_actor(request.headers.get("X-SOC-User", "local-analyst"))
         except ValueError as error:
             return jsonify(ok=False, error=str(error)), 400
         if not isinstance(title, str) or not title.strip() or len(title) > 200:
@@ -209,6 +210,10 @@ def register_incident_routes(app, auth_check):
                     (incident_id, ordinal, json.dumps(item, ensure_ascii=False)),
                 )
             _event(connection, incident_id, "created", actor, {"evidence_count": len(safe_evidence)}, created_at)
+            database.append_audit_event(
+                connection, actor, "incident_created", "incident", incident_id,
+                created_at, {"evidence_count": len(safe_evidence)},
+            )
         return jsonify(ok=True, incident=_details(incident_id)), 201
 
     @app.route("/api/incidents/<incident_id>", methods=["GET"])
@@ -227,12 +232,12 @@ def register_incident_routes(app, auth_check):
         if not auth_check():
             return jsonify(ok=False, error="Authentication required"), 401
         payload = request.get_json(silent=True) if request.is_json else None
-        if not isinstance(payload, dict) or set(payload) - {"status", "actor", "note"}:
+        if not isinstance(payload, dict) or set(payload) - {"status", "note"}:
             return jsonify(ok=False, error="Invalid status update"), 400
         next_status = payload.get("status")
         note = payload.get("note", "")
         try:
-            actor = _clean_actor(payload.get("actor"))
+            actor = _clean_actor(request.headers.get("X-SOC-User", "local-analyst"))
         except ValueError as error:
             return jsonify(ok=False, error=str(error)), 400
         if next_status not in INCIDENT_STATUSES or not isinstance(note, str) or len(note) > MAX_NOTE_CHARS:
@@ -249,6 +254,10 @@ def register_incident_routes(app, auth_check):
                 "UPDATE incidents SET status = ?, updated_at = ? WHERE incident_id = ?",
                 (next_status, now, incident_id),
             )
+            database.append_audit_event(
+                connection, actor, "status_changed", "incident", incident_id, now,
+                {"from": previous, "to": next_status},
+            )
             _event(connection, incident_id, "status_changed", actor, {
                 "from": previous, "to": next_status, "note": note.strip(),
             }, now)
@@ -259,11 +268,11 @@ def register_incident_routes(app, auth_check):
         if not auth_check():
             return jsonify(ok=False, error="Authentication required"), 401
         payload = request.get_json(silent=True) if request.is_json else None
-        if not isinstance(payload, dict) or set(payload) - {"analyst", "actor"} or "analyst" not in payload:
+        if not isinstance(payload, dict) or set(payload) != {"analyst"}:
             return jsonify(ok=False, error="Invalid assignment request"), 400
         analyst = payload["analyst"]
         try:
-            actor = _clean_actor(payload.get("actor"))
+            actor = _clean_actor(request.headers.get("X-SOC-User", "local-analyst"))
         except ValueError as error:
             return jsonify(ok=False, error=str(error)), 400
         if analyst is not None and (
@@ -279,6 +288,10 @@ def register_incident_routes(app, auth_check):
                 "UPDATE incidents SET assigned_analyst = ?, updated_at = ? WHERE incident_id = ?",
                 (analyst, now, incident_id),
             )
+            database.append_audit_event(
+                connection, actor, "assigned", "incident", incident_id, now,
+                {"analyst": analyst},
+            )
             _event(connection, incident_id, "assigned", actor, {"analyst": analyst}, now)
         return jsonify(ok=True, incident=_details(incident_id))
 
@@ -287,10 +300,10 @@ def register_incident_routes(app, auth_check):
         if not auth_check():
             return jsonify(ok=False, error="Authentication required"), 401
         payload = request.get_json(silent=True) if request.is_json else None
-        if not isinstance(payload, dict) or set(payload) - {"note", "author"}:
+        if not isinstance(payload, dict) or set(payload) != {"note"}:
             return jsonify(ok=False, error="Invalid incident note"), 400
         note = payload.get("note")
-        author = payload.get("author", "local-analyst")
+        author = request.headers.get("X-SOC-User", "local-analyst")
         if not isinstance(author, str) or not author.strip() or len(author) > 128:
             return jsonify(ok=False, error="author must be a non-empty string of at most 128 characters"), 400
         if not isinstance(note, str) or not note.strip() or len(note) > MAX_NOTE_CHARS:
@@ -310,6 +323,10 @@ def register_incident_routes(app, auth_check):
                 "UPDATE incidents SET updated_at = ? WHERE incident_id = ?",
                 (now, incident_id),
             )
+            database.append_audit_event(
+                connection, author.strip(), "note_added", "incident", incident_id,
+                now, {"note_id": note_id},
+            )
             _event(connection, incident_id, "note_added", author.strip(), {"note_id": note_id}, now)
         return jsonify(ok=True, note={"note_id": note_id, "author": author.strip(), "note": note.strip(), "created_at": now}), 201
 
@@ -318,12 +335,12 @@ def register_incident_routes(app, auth_check):
         if not auth_check():
             return jsonify(ok=False, error="Authentication required"), 401
         payload = request.get_json(silent=True) if request.is_json else None
-        if not isinstance(payload, dict) or set(payload) - {"decision", "rationale", "actor"}:
+        if not isinstance(payload, dict) or set(payload) - {"decision", "rationale"}:
             return jsonify(ok=False, error="Invalid incident decision"), 400
         decision = payload.get("decision")
         rationale = payload.get("rationale", "")
         try:
-            actor = _clean_actor(payload.get("actor"))
+            actor = _clean_actor(request.headers.get("X-SOC-User", "local-analyst"))
         except ValueError as error:
             return jsonify(ok=False, error=str(error)), 400
         if not isinstance(decision, str) or not decision.strip() or len(decision) > 100:
@@ -344,6 +361,10 @@ def register_incident_routes(app, auth_check):
             connection.execute(
                 "UPDATE incidents SET updated_at = ? WHERE incident_id = ?",
                 (now, incident_id),
+            )
+            database.append_audit_event(
+                connection, actor, "decision", "incident", incident_id, now,
+                {"decision": decision.strip()},
             )
             _event(connection, incident_id, "decision_recorded", actor, {
                 "decision_id": decision_id, "decision": decision.strip(),

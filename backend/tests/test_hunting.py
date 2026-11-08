@@ -37,6 +37,8 @@ class HuntingApiTests(unittest.TestCase):
         )
         self.db_patch.start()
         self.addCleanup(self.db_patch.stop)
+        database.init_db()
+        database.set_soc_user_role("hunter-one", "L3", "2026-01-01T00:00:00Z")
         self.env_patch = patch.dict(os.environ, {"SOC_AI_INTERNAL_TOKEN": TOKEN})
         self.env_patch.start()
         self.addCleanup(self.env_patch.stop)
@@ -132,7 +134,7 @@ class HuntingApiTests(unittest.TestCase):
         other_user = self.client.get(
             f"/api/hunts/{hunt_id}", headers={**HEADERS, "X-SOC-User": "hunter-two"}
         )
-        self.assertEqual(other_user.status_code, 404)
+        self.assertEqual(other_user.status_code, 403)
 
     def test_hunt_routes_require_internal_auth(self):
         unauthenticated = self.client.post(
@@ -144,7 +146,7 @@ class HuntingApiTests(unittest.TestCase):
             json={"question": "synthetic question"},
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
-        self.assertEqual(no_user.status_code, 400)
+        self.assertEqual(no_user.status_code, 403)
 
 
 if __name__ == "__main__":

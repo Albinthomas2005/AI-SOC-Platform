@@ -205,7 +205,7 @@ export class WazuhAiCtrl {
       const result = await context.core.opensearch.client.asCurrentUser.search({ index: body.index, body: { size: 1, track_total_hits: false, query: { ids: { values: [body.id] } }, _source: ALLOWED_ALERT_FIELDS } });
       const source = result?.body?.hits?.hits?.[0]?._source;
       if (!source) return response.custom({ statusCode: 404, body: { ok: false, error: 'Alert is unavailable' } });
-      const upstream = await needle('post', `${TRAINING_SERVICE_URL}/imported-cases`, { alert: minimizeAlert(source), user_id: username }, { json: true, headers: { Authorization: `Bearer ${token}` }, open_timeout: AI_SERVICE_TIMEOUT_MS, response_timeout: AI_SERVICE_TIMEOUT_MS });
+      const upstream = await needle('post', `${TRAINING_SERVICE_URL}/imported-cases`, { alert: minimizeAlert(source), user_id: username }, { json: true, headers: { Authorization: `Bearer ${token}`, 'X-SOC-User': username }, open_timeout: AI_SERVICE_TIMEOUT_MS, response_timeout: AI_SERVICE_TIMEOUT_MS });
       return response.custom({ statusCode: upstream.statusCode || 502, body: upstream.body });
     } catch (error) {
       if (getErrorStatusCode(error) === 403) return response.custom({ statusCode: 403, body: { ok: false, error: 'Access to this alert is denied' } });
@@ -242,7 +242,7 @@ export class WazuhAiCtrl {
     try {
       const upstream = await needle(method, target, body, {
         json: true,
-        headers: { Authorization: `Bearer ${internalToken}` },
+        headers: { Authorization: `Bearer ${internalToken}`, 'X-SOC-User': username },
         // eslint-disable-next-line camelcase
         open_timeout: AI_SERVICE_TIMEOUT_MS,
         // eslint-disable-next-line camelcase
@@ -267,6 +267,7 @@ export class WazuhAiCtrl {
     request: OpenSearchDashboardsRequest,
     response: OpenSearchDashboardsResponseFactory,
   ) {
+    let username: string;
     try {
       const currentUser = await context.wazuh.security.getCurrentUser(
         request,
@@ -278,6 +279,7 @@ export class WazuhAiCtrl {
           body: { ok: false, error: 'Authentication required' },
         });
       }
+      username = currentUser.username;
     } catch {
       return response.custom({
         statusCode: 401,
@@ -387,6 +389,7 @@ export class WazuhAiCtrl {
           json: true,
           headers: {
             Authorization: `Bearer ${internalToken}`,
+            'X-SOC-User': username,
           },
           // Needle names these timeout options with underscores.
           // eslint-disable-next-line camelcase
@@ -435,6 +438,7 @@ export class WazuhAiCtrl {
     request: OpenSearchDashboardsRequest,
     response: OpenSearchDashboardsResponseFactory,
   ) {
+    let username: string;
     try {
       const currentUser = await context.wazuh.security.getCurrentUser(
         request,
@@ -446,6 +450,7 @@ export class WazuhAiCtrl {
           body: { ok: false, error: 'Authentication required' },
         });
       }
+      username = currentUser.username;
     } catch {
       return response.custom({
         statusCode: 401,
@@ -571,7 +576,7 @@ export class WazuhAiCtrl {
         reportRequest,
         {
           json: true,
-          headers: { Authorization: 'Bearer ' + internalToken },
+          headers: { Authorization: 'Bearer ' + internalToken, 'X-SOC-User': username },
           // eslint-disable-next-line camelcase
           open_timeout: AI_SERVICE_TIMEOUT_MS,
           // eslint-disable-next-line camelcase
@@ -638,6 +643,7 @@ export class WazuhAiCtrl {
     request: OpenSearchDashboardsRequest,
     response: OpenSearchDashboardsResponseFactory,
   ) {
+    let username: string;
     try {
       const currentUser = await context.wazuh.security.getCurrentUser(
         request,
@@ -649,6 +655,7 @@ export class WazuhAiCtrl {
           body: { ok: false, error: 'Authentication required' },
         });
       }
+      username = currentUser.username;
     } catch {
       return response.custom({
         statusCode: 401,
@@ -690,7 +697,7 @@ export class WazuhAiCtrl {
         { decision, note, edited_analysis: editedAnalysis },
         {
           json: true,
-          headers: { Authorization: `Bearer ${internalToken}` },
+          headers: { Authorization: `Bearer ${internalToken}`, 'X-SOC-User': username },
           // eslint-disable-next-line camelcase
           open_timeout: AI_SERVICE_TIMEOUT_MS,
           // eslint-disable-next-line camelcase

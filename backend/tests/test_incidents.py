@@ -8,7 +8,7 @@ from app import app
 
 
 TOKEN = "incident-test-token"
-HEADERS = {"Authorization": f"Bearer {TOKEN}"}
+HEADERS = {"Authorization": f"Bearer {TOKEN}", "X-SOC-User": "incident-analyst"}
 
 
 class IncidentApiTests(unittest.TestCase):
@@ -22,6 +22,8 @@ class IncidentApiTests(unittest.TestCase):
         )
         self.db_patch.start()
         self.addCleanup(self.db_patch.stop)
+        database.init_db()
+        database.set_soc_user_role("incident-analyst", "L2", "2026-01-01T00:00:00Z")
         self.env_patch = patch.dict(os.environ, {"SOC_AI_INTERNAL_TOKEN": TOKEN})
         self.env_patch.start()
         self.addCleanup(self.env_patch.stop)
@@ -33,7 +35,6 @@ class IncidentApiTests(unittest.TestCase):
             json={
                 "title": "Synthetic SSH investigation",
                 "category": "authentication",
-                "actor": "analyst-one",
                 "alerts": [{
                     "_id": "alert-ssh-1",
                     "@timestamp": "2026-01-02T03:00:00Z",
@@ -84,7 +85,7 @@ class IncidentApiTests(unittest.TestCase):
         incident_id = incident["incident_id"]
         investigating = self.client.post(
             f"/api/incidents/{incident_id}/status",
-            json={"status": "Investigating", "actor": "analyst-one"},
+            json={"status": "Investigating"},
             headers=HEADERS,
         )
         self.assertEqual(investigating.status_code, 200)
@@ -125,7 +126,7 @@ class IncidentApiTests(unittest.TestCase):
         incident_id = self.create_from_alert()["incident_id"]
         assignment = self.client.post(
             f"/api/incidents/{incident_id}/assignment",
-            json={"analyst": "analyst-two", "actor": "team-lead"},
+            json={"analyst": "analyst-two"},
             headers=HEADERS,
         )
         self.assertEqual(assignment.status_code, 200)
@@ -133,13 +134,13 @@ class IncidentApiTests(unittest.TestCase):
 
         note = self.client.post(
             f"/api/incidents/{incident_id}/notes",
-            json={"author": "analyst-two", "note": "Reviewed the synthetic SSH evidence."},
+            json={"note": "Reviewed the synthetic SSH evidence."},
             headers=HEADERS,
         )
         self.assertEqual(note.status_code, 201)
         decision = self.client.post(
             f"/api/incidents/{incident_id}/decisions",
-            json={"actor": "analyst-two", "decision": "Escalate to identity team", "rationale": "Successful login followed repeated failures."},
+            json={"decision": "Escalate to identity team", "rationale": "Successful login followed repeated failures."},
             headers=HEADERS,
         )
         self.assertEqual(decision.status_code, 201)

@@ -214,6 +214,12 @@ def register_training_routes(app, has_valid_token):
         user_id = request.args.get("user_id", "local-analyst")[:200]
         scenarios = {scenario["id"]: scenario for scenario in _visible_scenarios()}
         rows = database.get_training_attempts_for_user(user_id)
+        database.record_audit_event(
+            request.headers.get("X-SOC-User", "local-analyst"),
+            "export", "training_progress", user_id,
+            datetime.now(timezone.utc).isoformat(),
+            {"attempt_count": len(rows)},
+        )
         category_stats = {}
         mistakes = {}
         wrong_verdict_categories = {}
@@ -302,7 +308,13 @@ def register_training_routes(app, has_valid_token):
         if not alert:
             return jsonify(ok=False, error="Alert has no analyzable fields"), 422
         case_id = uuid.uuid4().hex
-        database.save_training_imported_case(case_id, user_id, datetime.now(timezone.utc).isoformat(), alert)
+        created_at = datetime.now(timezone.utc).isoformat()
+        database.save_training_imported_case(case_id, user_id, created_at, alert)
+        database.record_audit_event(
+            request.headers.get("X-SOC-User", user_id),
+            "import", "training_case", case_id, created_at,
+            {"user_id": user_id},
+        )
         return jsonify(ok=True, case={"id": case_id, "title": "Imported Wazuh alert", "status": "unscored - no answer key", "alert": alert}), 201
 
     @app.post("/training/imported-cases/<case_id>/attempts")
@@ -387,6 +399,7 @@ def register_training_routes(app, has_valid_token):
                     disagreements.append((field, ai_assessment[field], expected))
             if set(ai_assessment["mitre_ids"]) != set(key["accepted_mitre_ids"]):
                 disagreements.append(("mitre_ids", ai_assessment["mitre_ids"], key["accepted_mitre_ids"]))
+        audit_user = request.headers.get("X-SOC-User", payload.get("user_id", "local-analyst"))
         database.save_training_attempt({
             "attempt_id": attempt_id,
             "user_id": payload.get("user_id", "local-analyst"),
@@ -402,6 +415,10 @@ def register_training_routes(app, has_valid_token):
             "ai_assessment": ai_assessment,
         })
         database.save_training_disagreements(attempt_id, scenario_id, disagreements, submitted_at)
+        database.record_audit_event(
+            audit_user, "decision", "training_attempt", attempt_id, submitted_at,
+            {"scenario_id": scenario_id, "verdict": payload["verdict"]},
+        )
         return jsonify(ok=True, attempt_id=attempt_id, score=score,
                        feedback={"verdict": score["verdict"]["correct"], "escalation": score["escalation"]["correct"], "mitre": score["mitre"]["correct"], "report": score["report"]["sections"]},
                        explanation=key["explanation"], answer_status=key.get("answer_status", "provisional"),
@@ -505,6 +522,11 @@ def register_training_routes(app, has_valid_token):
         if type(payload["time_spent"]) is not int or not 0 <= payload["time_spent"] <= 86400:
             return jsonify(ok=False, error="Time spent must be seconds between 0 and 86400"), 400
         database.save_training_shift_response(shift_id, payload)
+        database.record_audit_event(
+            request.headers.get("X-SOC-User", user_id),
+            "decision", "training_shift_response", f"{shift_id}:{payload['scenario_id']}",
+            now.isoformat(), {"verdict": payload["verdict"]},
+        )
         return jsonify(ok=True, recorded=True, remaining=len(scenario_ids) - len(database.get_training_shift_responses(shift_id)))
 
     @app.post("/training/shifts/<shift_id>/complete")

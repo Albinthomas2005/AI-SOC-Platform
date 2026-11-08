@@ -15,7 +15,13 @@ from flask import (
     request,
 )
 
-from database import get_connection, init_db, save_ai_analysis, set_ai_analysis_decision
+from database import (
+    get_connection,
+    init_db,
+    record_audit_event,
+    save_ai_analysis,
+    set_ai_analysis_decision,
+)
 from training import register_training_routes
 from correlation import correlate_alerts
 from incidents import register_incident_routes
@@ -26,6 +32,7 @@ from threat_intel import (
     summarize_threat_intel,
 )
 from hunting import register_hunting_routes
+from roles_audit import enforce_route_access, register_admin_routes
 from groq_service import (
     explain_alert,
     generate_investigation_report,
@@ -67,6 +74,11 @@ def initialize_database_for_request():
     init_db()
 
 
+@app.before_request
+def authorize_api_route():
+    return enforce_route_access(has_valid_internal_token)
+
+
 def has_valid_internal_token():
     expected_token = os.environ.get("SOC_AI_INTERNAL_TOKEN", "")
     authorization = request.headers.get("Authorization", "")
@@ -86,6 +98,7 @@ def has_valid_internal_token():
 register_training_routes(app, has_valid_internal_token)
 register_incident_routes(app, has_valid_internal_token)
 register_hunting_routes(app, has_valid_internal_token)
+register_admin_routes(app, has_valid_internal_token)
 
 
 @app.route("/api/threat-intel/lookup", methods=["POST"])
@@ -306,6 +319,10 @@ def generate_report_api():
             json.dumps(safe_alert, ensure_ascii=False),
             report,
         )
+        record_audit_event(
+            request.headers.get("X-SOC-User", "local-analyst"),
+            "report_generated", "ai_analysis", analysis_id, created_at,
+        )
     except GroqUnavailable:
         return jsonify(
             ok=False,
@@ -373,6 +390,11 @@ def record_analysis_decision(analysis_id):
         return jsonify(ok=False, error="Analyst decision could not be saved"), 500
     if not updated:
         return jsonify(ok=False, error="Analysis was not found"), 404
+    record_audit_event(
+        request.headers.get("X-SOC-User", "local-analyst"),
+        "decision", "ai_analysis", analysis_id, decided_at,
+        {"decision": decision},
+    )
 
     return jsonify(
         ok=True,

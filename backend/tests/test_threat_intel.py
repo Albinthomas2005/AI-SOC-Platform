@@ -16,7 +16,7 @@ from threat_intel import (
 
 
 TOKEN = "threat-intel-test-token"
-HEADERS = {"Authorization": f"Bearer {TOKEN}"}
+HEADERS = {"Authorization": f"Bearer {TOKEN}", "X-SOC-User": "intel-analyst"}
 
 
 class FakeHttpResponse:
@@ -45,6 +45,7 @@ class ThreatIntelTests(unittest.TestCase):
         self.db_patch.start()
         self.addCleanup(self.db_patch.stop)
         database.init_db()
+        database.set_soc_user_role("intel-analyst", "L2", "2026-01-01T00:00:00Z")
         self.env_patch = patch.dict(os.environ, {"SOC_AI_INTERNAL_TOKEN": TOKEN})
         self.env_patch.start()
         self.addCleanup(self.env_patch.stop)

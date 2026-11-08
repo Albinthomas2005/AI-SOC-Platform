@@ -241,6 +241,22 @@ It submits minimized results to `/api/hunts/<id>/results` for interpretation
 and storage. Hunt reports are scoped to their creating username. Provider
 prompts are privacy-filtered by the existing backend provider boundary.
 
+## Roles and audit
+
+Every `/api/` and `/training/` route is gated by both the internal bearer token
+and the role associated with `X-SOC-User` (missing identity falls back to the
+least-privileged `local-analyst`). L1 can use analysis/report/training routes;
+L2 adds correlation, incidents, and threat intel; L3 adds hunting; admin can
+manage users and view audit records. Set comma-separated bootstrap accounts
+with `SOC_AI_ADMIN_USERS` in the protected backend environment. Admins can
+assign L1, L2, L3, or admin through `PUT /api/admin/users/<username>/role`.
+
+`GET /api/admin/audit` is admin-only. Audit events record the user, action,
+object, time, and compact details for analyst decisions, incident status
+changes, imports, training progress exports, and role changes. SQLite triggers
+reject updates and deletes to the audit table. Route-role and audit behavior
+is covered with temporary-database tests.
+
 ## Security notes
 
 - Never commit API keys, passwords, private keys, databases, or real security logs.
@@ -251,7 +267,7 @@ prompts are privacy-filtered by the existing backend provider boundary.
 
 ## Project status
 
-The repository includes the synthetic-alert integration, OpenSearch role examples, importer, and 23 privacy-filter tests. The full backend test suite currently contains 53 tests. Automated processing of selected real alerts is not yet considered production-ready.
+The repository includes synthetic integrations, OpenSearch role examples, an importer, training workflows, and backend tests. The current suite count is reported in the root README. Automated processing of selected real alerts is not yet considered production-ready.
 
 ## Author
 
