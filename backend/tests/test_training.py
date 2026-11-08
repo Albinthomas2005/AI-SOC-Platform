@@ -27,6 +27,7 @@ class TrainingApiTests(unittest.TestCase):
         self.catalog = Path(self.temp.name) / "mitre.json"
         self.catalog.write_text(json.dumps({"techniques": [
             {"id": "T1110.001", "name": "Password Guessing"},
+            {"id": "T1110", "name": "Brute Force", "tactics": ["Credential Access"]},
         ]}), encoding="utf-8")
         self.catalog_patch = patch.object(training, "CATALOG_PATH", self.catalog)
         self.catalog_patch.start()
@@ -124,9 +125,17 @@ class TrainingApiTests(unittest.TestCase):
         self.assertFalse(score["escalation"]["correct"])
 
     def test_invalid_mitre_ids_are_flagged(self):
-        response = self.submit(mitre_ids=["T9999", "not-an-id"])
+        import training
+        from mitre_validation import load_techniques, validate_technique_id
+
+        catalog = load_techniques(training.CATALOG_PATH)
+        self.assertEqual(validate_technique_id("T1110", catalog), "valid")
+        self.assertEqual(validate_technique_id("T9999", catalog), "invalid")
+        response = self.submit(mitre_ids=["T1110", "T9999", "not-an-id"])
         mitre = response.get_json()["score"]["mitre"]
+        self.assertCountEqual(mitre["valid"], ["T1110"])
         self.assertCountEqual(mitre["invalid"], ["T9999", "not-an-id"])
+        self.assertEqual(mitre["unverified"], [])
         self.assertFalse(mitre["correct"])
 
     def test_missing_report_sections_reduce_completeness_score(self):

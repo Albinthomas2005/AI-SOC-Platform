@@ -33,10 +33,11 @@ organization's data handling requirements before using real telemetry.
 
 The backend test suite uses mocked AI behavior; it does not prove live-provider
 quality. The latest saved synthetic evaluation predates current response
-validation and catalog changes. The complete local MITRE catalog has not been
-provided. The latest Dashboard TypeScript changes have not been built or tested
-in the pinned development image, and the UI decision flow has not been tested
-against a running Wazuh installation.
+validation and catalog changes. A local catalog is generated from the supplied
+Enterprise STIX bundle; this verifies ID membership, not the correctness of
+technique-to-evidence mappings. The latest Dashboard TypeScript changes have
+not been built or tested in the pinned development image, and the UI decision
+flow has not been tested against a running Wazuh installation.
 
 Use synthetic lab data until these gaps are reviewed. Keep the backend on
 loopback, protect the shared service token, and never commit `.env` files,

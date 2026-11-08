@@ -79,9 +79,11 @@ escalation 20, MITRE selection 20, and report completeness 20. The report check
 looks for a summary/verdict, evidence, actions or investigation steps, and
 unknowns/limitations. It checks structure, not the quality or factual accuracy
 of report prose. Invalid or malformed MITRE IDs are reported. ATT&CK IDs are
-verified against the local catalog loader; if the catalog is missing, their
-status is unverified and the MITRE field is not scored. Hints are free and do
-not reduce points. AI output never changes the deterministic score.
+verified against the generated local Enterprise ATT&CK catalog. If the catalog
+is missing or unusable, their status is unverified and the MITRE field is not
+scored. Catalog membership does not establish whether a technique is supported
+by the scenario evidence. Hints are free and do not reduce points. AI output
+never changes the deterministic score.
 
 The AI assessment receives visible scenario evidence only. It does not receive
 the answer key. Coaching runs after submission and reviews the analyst's report
@@ -112,8 +114,8 @@ schema-validated AI clarity and completeness coaching.
   established.
 - All 16 new scenario keys need review by the person using Training Mode.
 - Legacy cases marked ambiguous have no guessed verdict/escalation grading.
-- MITRE checking remains unverified until a reviewed local ATT&CK catalog is
-  installed.
+- MITRE IDs are checked against the local generated ATT&CK catalog, but
+  technique-to-evidence mappings still need analyst review.
 - The Dashboard tests and plugin build require the pinned Dashboard
   dependencies and have not been run in this workspace.
 - Shift scoring and handover coaching have mocked backend tests; the plugin

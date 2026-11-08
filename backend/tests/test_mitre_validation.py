@@ -19,6 +19,7 @@ class TestMitreValidation(unittest.TestCase):
             json.dumps(
                 {
                     "techniques": [
+                        {"id": "T1110", "name": "Brute Force", "tactics": ["Credential Access"]},
                         {"id": "T1059.001", "name": "PowerShell"},
                     ]
                 }
@@ -29,6 +30,9 @@ class TestMitreValidation(unittest.TestCase):
 
     def test_valid_technique_id_is_accepted(self):
         self.assertEqual(validate_technique_id("T1059.001", self.catalog), "valid")
+
+    def test_real_parent_technique_id_is_accepted(self):
+        self.assertEqual(validate_technique_id("T1110", self.catalog), "valid")
 
     def test_unknown_well_formed_id_is_invalid(self):
         self.assertEqual(validate_technique_id("T9999", self.catalog), "invalid")
