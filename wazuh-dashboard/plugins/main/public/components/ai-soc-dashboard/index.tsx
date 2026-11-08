@@ -28,6 +28,12 @@ const openThreatHuntingAlerts = () => {
   });
 };
 
+const openSecurityOperationsWorkbench = () => {
+  void NavigationService.getInstance().navigateToApp(
+    'security-operations-workbench',
+  );
+};
+
 function displayTimestamp(timestamp?: string): string {
   if (!timestamp || Number.isNaN(Date.parse(timestamp))) return '—';
   return new Date(timestamp).toLocaleString();
@@ -206,6 +212,12 @@ export const AiSocDashboard: React.FC = () => {
               <EuiText size='s'>Wazuh alerts from the last 24 hours</EuiText>
             </EuiFlexItem>
             <EuiFlexItem grow={false}>
+              <EuiButton
+                onClick={openSecurityOperationsWorkbench}
+                iconType='grid'
+              >
+                Workbench
+              </EuiButton>
               <EuiButton
                 onClick={openThreatHuntingAlerts}
                 iconType='arrowRight'

@@ -7,6 +7,7 @@ import { WzRequest } from '../../react-services/wz-request';
 import { AiSocDashboard } from './index';
 import { aiSocDashboardRoute } from './route';
 import { useAiSocOverview } from './use-ai-soc-overview';
+import { Applications } from '../../utils/applications';
 
 jest.mock('../../react-services/navigation-service', () => ({
   __esModule: true,
@@ -65,6 +66,16 @@ describe('AiSocDashboard', () => {
     expect(navigateToApp).toHaveBeenCalledWith('threat-hunting', {
       path: '#overview/?tab=general&tabView=events',
     });
+  });
+  it('opens the registered SOC Workbench from the dashboard', () => {
+    const navigateToApp = jest.fn();
+    (NavigationService.getInstance as jest.Mock).mockReturnValue({ navigateToApp });
+    render(<AiSocDashboard />);
+    fireEvent.click(screen.getByRole('button', { name: 'Workbench' }));
+    expect(navigateToApp).toHaveBeenCalledWith('security-operations-workbench');
+  });
+  it('keeps the SOC Workbench registered in the left navigation application list', () => {
+    expect(Applications.some(application => application.id === 'security-operations-workbench')).toBe(true);
   });
   it('requests a report by alert reference and marks the response unverified', async () => {
     (WzRequest.genericReq as jest.Mock).mockResolvedValue({
