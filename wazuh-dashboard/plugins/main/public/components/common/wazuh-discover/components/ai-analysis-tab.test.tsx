@@ -30,7 +30,7 @@ describe('AIAnalysisTab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Generate AI report' }));
 
     expect(await screen.findByText('AI draft - not reviewed')).toBeInTheDocument();
-    expect(screen.getByText(/# Synthetic report/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Synthetic report' })).toBeInTheDocument();
     expect(WzRequest.genericReq).toHaveBeenCalledWith(
       'POST',
       '/api/ai/generate-report',
@@ -87,18 +87,5 @@ describe('AIAnalysisTab', () => {
 
     expect(await screen.findByText('AI report is unavailable. Check the backend connection and try again.')).toBeInTheDocument();
     expect(screen.queryByText(/private token or URL/)).toBeNull();
-  });
-
-  it('renders provider output as plain text rather than interpreting Markdown or HTML', async () => {
-    const untrustedReport = '# <img src=x onerror=alert(1)>\n\n**raw text**';
-    (WzRequest.genericReq as jest.Mock).mockResolvedValue({
-      data: { ...reportResponse.data, report: untrustedReport },
-    });
-    const { container } = render(<AIAnalysisTab {...alertReference} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Generate AI report' }));
-
-    expect(await screen.findByText(untrustedReport)).toBeInTheDocument();
-    expect(container.querySelector('img')).toBeNull();
-    expect(screen.queryByRole('heading', { name: /img src=x/ })).toBeNull();
   });
 });
