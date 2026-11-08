@@ -201,6 +201,19 @@ export const analystTraining = {
   redirectTo: () => '/training',
 };
 
+export const securityOperationsWorkbench = {
+  category: 'wz-category-security-operations',
+  id: 'security-operations-workbench',
+  title: i18n.translate('wazuh.securityOperationsWorkbench.app.title', { defaultMessage: 'SOC Workbench' }),
+  breadcrumbLabel: i18n.translate('wazuh.securityOperationsWorkbench.app.breadcrumbLabel', { defaultMessage: 'SOC Workbench' }),
+  description: i18n.translate('wazuh.securityOperationsWorkbench.app.description', { defaultMessage: 'Correlate, investigate, enrich, hunt, and ask about security evidence.' }),
+  euiIconType: 'securityAnalyticsApp',
+  order: 403,
+  showInOverviewApp: true,
+  showInAgentMenu: false,
+  redirectTo: () => '/phase-workbench',
+};
+
 export const vulnerabilityDetection = {
   category: 'wz-category-threat-intelligence',
   id: 'vulnerability-detection',
@@ -910,6 +923,7 @@ export const Applications = [
   threatHunting,
   aiSocDashboard,
   analystTraining,
+  securityOperationsWorkbench,
   vulnerabilityDetection,
   mitreAttack,
   pciDss,

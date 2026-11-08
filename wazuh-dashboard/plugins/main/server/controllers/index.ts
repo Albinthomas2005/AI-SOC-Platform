@@ -14,5 +14,6 @@ export { WazuhApiCtrl } from './wazuh-api';
 export { WazuhReportingCtrl } from './wazuh-reporting';
 export { WazuhAiCtrl } from './wazuh-ai';
 export { WazuhHuntingCtrl } from './wazuh-hunting';
+export { WazuhPhaseCtrl } from './wazuh-phase';
 export { WazuhHostsCtrl } from './wazuh-hosts';
 export * from './wazuh-utils';
