@@ -270,6 +270,17 @@ the repository root. Set `SOC_AI_INTERNAL_TOKEN`; it only requests the
 authenticated training scenario list. The load script is documented and has
 not been run.
 
+## Evidence assistant
+
+`POST /api/assistant/chat` accepts a question and up to ten `{type, id}`
+references for alert, report, incident, or hunt records. It loads only stored
+objects available to the authenticated user's role (L1 reports/alerts, L2
+incidents, L3 hunts; hunts are owner-scoped) and sends that evidence through
+the standard privacy-filtered provider boundary. Answers must cite source
+IDs as `[type:id]`. If no referenced object is accessible, it returns a
+deterministic refusal without a provider call. Coverage uses mocked providers
+and temporary databases.
+
 ## Security notes
 
 - Never commit API keys, passwords, private keys, databases, or real security logs.
