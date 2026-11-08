@@ -130,6 +130,32 @@ class RolesAndAuditTests(unittest.TestCase):
         response = self.client.get("/api/admin/audit")
         self.assertEqual(response.status_code, 401)
 
+    def test_every_api_and_training_route_rejects_missing_and_wrong_tokens(self):
+        import re
+
+        routes = [
+            rule for rule in app.url_map.iter_rules()
+            if rule.rule.startswith(("/api/", "/training/"))
+        ]
+        self.assertTrue(routes)
+        for route in routes:
+            path = re.sub(r"<[^>]+>", "test-id", route.rule)
+            for method in route.methods & {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+                with self.subTest(path=path, method=method, token="missing"):
+                    missing = self.client.open(path, method=method, json={})
+                    self.assertEqual(missing.status_code, 401)
+                with self.subTest(path=path, method=method, token="wrong"):
+                    wrong = self.client.open(
+                        path,
+                        method=method,
+                        json={},
+                        headers={
+                            "Authorization": "Bearer definitely-wrong",
+                            "X-SOC-User": "test-l1",
+                        },
+                    )
+                    self.assertEqual(wrong.status_code, 401)
+
 
 if __name__ == "__main__":
     unittest.main()
