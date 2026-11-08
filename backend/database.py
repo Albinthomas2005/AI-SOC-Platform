@@ -9,7 +9,9 @@ DB_PATH = Path(__file__).parent / "soc_alerts.db"
 
 
 def get_connection():
-    connection = sqlite3.connect(DB_PATH)
+    configured_path = os.environ.get("SOC_AI_DB_PATH", "").strip()
+    database_path = Path(configured_path).expanduser() if configured_path else DB_PATH
+    connection = sqlite3.connect(database_path)
     connection.row_factory = sqlite3.Row
     return connection
 

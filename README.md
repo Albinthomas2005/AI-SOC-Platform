@@ -116,7 +116,7 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
 Pending: browser test, Dashboard plugin build, screenshots, analyst review of
 the 16 **DRAFT** answer keys, evaluation rerun/live evaluation, event-correlation
 browser review, production data retention/load test, and production readiness.
-The backend suite has passed **157 tests** in the last recorded run; the smoke
+The backend suite has passed **162 tests** in the latest audited-branch run; the smoke
 script, browser UI, plugin build, live provider behavior, and live evaluation
 have not been run for this workbench update.
 
@@ -210,6 +210,9 @@ the Flask service, Dashboard server, scripts, and evaluator. `SOC_AI_HOST` accep
 loopback values by default; non-loopback binding requires
 `SOC_AI_ALLOW_NON_LOOPBACK=true` and separate network controls. Do not expose
 the backend port to the network.
+
+`SOC_AI_DB_PATH` optionally selects a different SQLite database and is read
+when each database connection is opened, including after `.env` is loaded.
 
 Start the backend from `backend/`:
 
