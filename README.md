@@ -105,10 +105,11 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
 | Backend alert analysis, report generation, analyst decisions, training, and shifts; backend tests use temporary databases and mocked providers. | Browser test and Dashboard plugin build; the selected-alert review test is written, not run. |
 | Selected-alert review now connects report generation and Edit/Approve/Reject actions to backend SQLite decisions. | Screenshots and analyst review of the 16 draft answer keys. |
 | Deterministic event correlation groups alerts by shared host, user, or source IP in a configurable time window and returns evidence timelines; AI summarizes only grouped, privacy-filtered results. | Correlation UI and browser verification. |
+| SQLite incident API creates incidents from alerts or correlation groups, validates status transitions, records assignment/notes/decisions/evidence, and generates Markdown reports. | Incident UI and browser verification. |
 | Backend, Dashboard server, scripts, and evaluator use `SOC_AI_PORT` (default `5000`). | Live evaluation; the CLI and report path have only been checked with mocks. |
-| Evaluation CLI reads `GROQ_API_KEY` and `SOC_AI_INTERNAL_TOKEN` from the process environment and targets `docs/EVALUATION_RESULTS.md`. | Incident management, threat intelligence integration, AI threat hunting, roles/audit, retention/limits, assistant, plugin screens, and production readiness. |
+| Evaluation CLI reads `GROQ_API_KEY` and `SOC_AI_INTERNAL_TOKEN` from the process environment and targets `docs/EVALUATION_RESULTS.md`. | Threat intelligence integration, AI threat hunting, roles/audit, retention/limits, assistant, plugin screens, and production readiness. |
 
-For this phase, the backend suite passed **125 tests** and
+For this phase, the backend suite passed **131 tests** and
 `git diff --check` passed. The smoke script, browser UI, plugin build, live
 provider behavior, and live evaluation were not run.
 

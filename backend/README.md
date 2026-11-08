@@ -52,7 +52,7 @@ Ollama requests are sent to `/api/chat`; the model must support the chat
 endpoint. No provider credentials are required for this local option. This
 adapter is covered by mocked tests; a real Ollama model has not been run here.
 
-The Flask service exposes three token-protected application endpoints. `POST /api/ai/analyze-alert`
+The Flask service exposes token-protected application endpoints. `POST /api/ai/analyze-alert`
 accepts a Wazuh alert for trusted services that need an AI explanation. It requires a bearer token in the
 `SOC_AI_INTERNAL_TOKEN` environment variable, accepts a JSON object containing
 an `alert` object, sanitizes the alert before analysis, and returns JSON. The
@@ -203,6 +203,17 @@ such as SSH failures, success, and sudo. The provider receives only the
 grouped timeline and summarizes it; entity values are redacted before the
 provider call. If no groups are found, the endpoint returns a deterministic
 message without calling a provider.
+
+## Incident API
+
+Every `/api/incidents` route requires the same internal bearer token. Create
+an incident with `POST /api/incidents` using either an `alerts` array or a
+`correlation_group` with a timeline. `GET /api/incidents` lists incidents;
+`GET /api/incidents/<id>` returns evidence, analyst notes, decision log, and
+timeline. The `/status`, `/assignment`, `/notes`, and `/decisions` POST routes
+record validated workflow changes. `GET /api/incidents/<id>/report` returns a
+Markdown report. Allowed statuses are New, Investigating, Escalated, Contained,
+Resolved, and Closed; transitions are validated and Closed is terminal.
 
 ## Security notes
 

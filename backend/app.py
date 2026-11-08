@@ -17,6 +17,7 @@ from flask import (
 from database import init_db, save_ai_analysis, set_ai_analysis_decision
 from training import register_training_routes
 from correlation import correlate_alerts
+from incidents import register_incident_routes
 from groq_service import (
     explain_alert,
     generate_investigation_report,
@@ -75,6 +76,7 @@ def has_valid_internal_token():
 
 
 register_training_routes(app, has_valid_internal_token)
+register_incident_routes(app, has_valid_internal_token)
 
 
 @app.route("/api/correlations", methods=["POST"])

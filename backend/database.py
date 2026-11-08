@@ -143,6 +143,66 @@ def init_db():
             )
         """)
 
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incidents (
+                incident_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL CHECK (status IN (
+                    'New', 'Investigating', 'Escalated', 'Contained',
+                    'Resolved', 'Closed'
+                )),
+                assigned_analyst TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incident_evidence (
+                evidence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                incident_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                evidence_json TEXT NOT NULL,
+                FOREIGN KEY (incident_id) REFERENCES incidents(incident_id)
+                    ON DELETE CASCADE
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incident_notes (
+                note_id TEXT PRIMARY KEY,
+                incident_id TEXT NOT NULL,
+                author TEXT NOT NULL,
+                note TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (incident_id) REFERENCES incidents(incident_id)
+                    ON DELETE CASCADE
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incident_decisions (
+                decision_id TEXT PRIMARY KEY,
+                incident_id TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                rationale TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (incident_id) REFERENCES incidents(incident_id)
+                    ON DELETE CASCADE
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incident_events (
+                event_id TEXT PRIMARY KEY,
+                incident_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                detail_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (incident_id) REFERENCES incidents(incident_id)
+                    ON DELETE CASCADE
+            )
+        """)
+
 
 def add_alert(timestamp, severity, rule, source_ip, status="New"):
     with closing(get_connection()) as connection, connection:
