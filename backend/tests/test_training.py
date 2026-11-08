@@ -108,9 +108,9 @@ class TrainingApiTests(unittest.TestCase):
         with patch.object(training, "assess_training_scenario", return_value={
             "verdict": "benign", "escalate": False, "mitre_ids": [],
         }) as assess:
-            response = self.submit()
+            response = self.submit(scenario_id="ssh-no-success")
         self.assertEqual(response.get_json()["ai"]["verdict"], "benign")
-        self.assertEqual(assess.call_args.args[0]["id"], "ssh-brute-force")
+        self.assertEqual(assess.call_args.args[0]["id"], "ssh-no-success")
         self.assertNotIn("expected_verdict", str(assess.call_args.args[0]))
         disagreements = database.get_training_ai_disagreements()
         self.assertGreaterEqual(len(disagreements), 2)

@@ -294,7 +294,7 @@ def register_training_routes(app, has_valid_token):
         attempt_id = uuid.uuid4().hex
         submitted_at = datetime.now(timezone.utc).isoformat()
         disagreements = []
-        if ai_assessment is not None and score["answer_status"] == "provisional":
+        if ai_assessment is not None and not score["answer_status"].startswith("ambiguous"):
             for field in ("verdict", "escalate"):
                 expected = key[f"expected_{field}"]
                 if ai_assessment[field] != expected:

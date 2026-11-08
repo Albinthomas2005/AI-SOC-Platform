@@ -282,6 +282,7 @@ export const TrainingPage: React.FC = () => {
             </EuiPanel>}
             {result && <EuiPanel>
               <EuiTitle size='m'><h2>Your score: {result.score.total}/{result.score.maximum}</h2></EuiTitle>
+              {result.answer_status === 'draft - needs analyst review' && <EuiCallOut color='warning' title='This scenario answer key is a draft and needs analyst review.' />}
               <EuiText><p>Verdict: {result.score.verdict.points}/40 · Escalation: {result.score.escalation.points}/20 · MITRE: {result.score.mitre.points}/20 · Report: {result.score.report.points}/20</p></EuiText>
               <EuiText><p>Verdict {result.score.verdict.correct === null ? 'not graded: review needed' : result.score.verdict.correct ? 'correct' : 'review the expected verdict'}; escalation {result.score.escalation.correct === null ? 'not graded' : result.score.escalation.correct ? 'correct' : 'needs review'}; invalid MITRE IDs: {result.score.mitre.invalid.join(', ') || 'none'}.</p></EuiText>
               <EuiTitle size='s'><h3>Coaching explanation</h3></EuiTitle><EuiText><p>{result.explanation}</p></EuiText>
