@@ -86,7 +86,7 @@ The separate [`docs/EVALUATION.md:3–7`](EVALUATION.md) accurately points to th
 
 ### Threat Hunting AI Analysis
 
-The tab is conditionally registered for Threat Hunting and calls the plugin's same-origin route with selected alert identifiers ([`wz-discover.tsx:222–238`](../wazuh-dashboard/plugins/main/public/components/common/wazuh-discover/wz-discover.tsx); [`ai-analysis-tab.tsx:23–63`](../wazuh-dashboard/plugins/main/public/components/common/wazuh-discover/components/ai-analysis-tab.tsx)). Markdown is rendered through `EuiMarkdownFormat` ([`ai-analysis-tab.tsx:97–105`](../wazuh-dashboard/plugins/main/public/components/common/wazuh-discover/components/ai-analysis-tab.tsx)).
+The shared tab is registered for Threat Hunting, Malware Detection Events, MITRE Events, and the MITRE technique recent-events flyout ([`wz-discover.tsx`](../wazuh-dashboard/plugins/main/public/components/common/wazuh-discover/wz-discover.tsx); [`ai-analysis-tabs.tsx`](../wazuh-dashboard/plugins/main/public/components/common/wazuh-discover/components/ai-analysis-tabs.tsx); [`flyout-technique.tsx`](../wazuh-dashboard/plugins/main/public/components/overview/mitre/framework/components/techniques/components/flyout-technique/flyout-technique.tsx)). It uses the same same-origin authenticated report route with only the selected alert index and ID; returned report text is displayed without Markdown interpretation. Plugin render tests are written, not run.
 
 The historical audit found that the analyze controller dropped the ID and had no decision controls. Phase 1 changes the selected-alert tab to request a stored report and send edit/approve/reject decisions through the protected Dashboard and backend routes. The browser test is written, not run.
 

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createAIAnalysisTabs } from '../../../../../../../common/wazuh-discover/components/ai-analysis-tabs';
 import { EuiCodeBlock, EuiFlexGroup, EuiTabbedContent } from '@elastic/eui';
 import { useDocViewer } from '../../../../../../../common/doc-viewer/use-doc-viewer';
 import DocViewer from '../../../../../../../common/doc-viewer/doc-viewer';
@@ -88,6 +89,7 @@ const TechniqueRowDetails = ({
             name: 'Rule',
             content: <RuleDetails data={ruleData} onClick={onAddFilter} />,
           },
+          ...createAIAnalysisTabs(doc),
         ]}
       />
     </EuiFlexGroup>

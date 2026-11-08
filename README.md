@@ -112,6 +112,7 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
 | 10b: dry-run retention and request/rate limits | Implemented, unverified in browser |
 | Plugin workbench for correlation, incidents, intel, hunting, audit and assistant | Implemented, unverified in browser; plugin tests written, not run |
 | Evaluation CLI | Implemented with mocked tests; live evaluation not run |
+| AI Analysis in Threat Hunting, Malware Detection, MITRE Events, and technique recent-event details | Implemented in source; plugin render tests written, not run |
 
 Pending: browser test, Dashboard plugin build, screenshots, analyst review of
 the 16 **DRAFT** answer keys, evaluation rerun/live evaluation, event-correlation
