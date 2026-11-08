@@ -11,6 +11,7 @@ export const PhaseWorkbench: React.FC = () => {
   const [question, setQuestion] = useState('');
   const [result, setResult] = useState<any>();
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [incidents, setIncidents] = useState<any[]>([]);
   const [incidentId, setIncidentId] = useState('');
   const [status, setStatus] = useState('Investigating');
@@ -18,6 +19,8 @@ export const PhaseWorkbench: React.FC = () => {
 
   const call = async (method: string, path: string, body?: any) => {
     setError('');
+    setResult(undefined);
+    setIsLoading(true);
     try {
       const response: any = await WzRequest.genericReq(method, path, body, { shouldRetry: false, checkCurrentApiIsUp: false });
       setResult(response?.data);
@@ -25,6 +28,8 @@ export const PhaseWorkbench: React.FC = () => {
     } catch (e: any) {
       setError(e?.response?.data?.error || e?.message || 'Request failed');
       return undefined;
+    } finally {
+      setIsLoading(false);
     }
   };
   const parseRefs = () => {
@@ -61,19 +66,23 @@ export const PhaseWorkbench: React.FC = () => {
       {(tab === 0 || tab === 2 || tab === 5) && <EuiFormRow label="Wazuh alert references (JSON)"><EuiTextArea value={refs} onChange={e => setRefs(e.target.value)} rows={3} /></EuiFormRow>}
       {(tab === 3 || tab === 5) && <EuiFormRow label="Question"><EuiTextArea value={question} onChange={e => setQuestion(e.target.value)} rows={3} /></EuiFormRow>}
       {tab === 1 && <>
-        <EuiButton onClick={loadIncidents}>Refresh incidents</EuiButton><EuiSpacer />
+        <EuiButton isLoading={isLoading} isDisabled={isLoading} onClick={loadIncidents}>Refresh incidents</EuiButton><EuiSpacer />
         <EuiSelect aria-label="Incident" options={incidents.map(i => ({ value: i.incident_id, text: `${i.title} · ${i.status}` }))} value={incidentId} onChange={e => { setIncidentId(e.target.value); if (e.target.value) void call('GET', `/api/phase/incidents/${e.target.value}`); }} prepend="Incident" />
         <EuiSpacer />
         <EuiSelect aria-label="Status" options={['New', 'Investigating', 'Escalated', 'Contained', 'Resolved', 'Closed'].map(value => ({ value, text: value }))} value={status} onChange={e => setStatus(e.target.value)} prepend="Status" />
-        <EuiButton disabled={!incidentId} onClick={() => call('POST', `/api/phase/incidents/${incidentId}/status`, { status })}>Update status</EuiButton>
+        <EuiButton isLoading={isLoading} disabled={isLoading || !incidentId} onClick={() => call('POST', `/api/phase/incidents/${incidentId}/status`, { status })}>Update status</EuiButton>
         <EuiFormRow label="Incident note"><EuiTextArea value={note} onChange={e => setNote(e.target.value)} /></EuiFormRow>
-        <EuiButton disabled={!incidentId || !note.trim()} onClick={() => call('POST', `/api/phase/incidents/${incidentId}/notes`, { note })}>Add note</EuiButton>
-        <EuiButton onClick={createIncident}>Create incident from correlation result</EuiButton>
+        <EuiButton isLoading={isLoading} disabled={isLoading || !incidentId || !note.trim()} onClick={() => call('POST', `/api/phase/incidents/${incidentId}/notes`, { note })}>Add note</EuiButton>
+        <EuiButton isLoading={isLoading} isDisabled={isLoading} onClick={createIncident}>Create incident from correlation result</EuiButton>
         {result?.incident && <><EuiSpacer /><EuiCodeBlock language="json">{JSON.stringify(result.incident, null, 2)}</EuiCodeBlock></>}
       </>}
-      {tab !== 1 && <EuiButton fill onClick={act}>{tab === 0 ? 'Build correlation timeline' : tab === 2 ? 'Look up threat indicators' : tab === 3 ? 'Run hunt' : tab === 4 ? 'Load audit events' : 'Ask assistant'}</EuiButton>}
+      {tab !== 1 && <EuiButton fill isLoading={isLoading} isDisabled={isLoading} onClick={act}>{tab === 0 ? 'Build correlation timeline' : tab === 2 ? 'Look up threat indicators' : tab === 3 ? 'Run hunt' : tab === 4 ? 'Load audit events' : 'Ask assistant'}</EuiButton>}
+      {isLoading && <><EuiSpacer /><p role="status">Loading request…</p></>}
       {error && <><EuiSpacer /><EuiCallOut color="danger" title={error} /></>}
-      {result && <><EuiSpacer /><EuiCodeBlock language="json" isCopyable>{JSON.stringify(result, null, 2)}</EuiCodeBlock></>}
+      {!isLoading && !error && !result && <><EuiSpacer /><EuiCallOut title="No results yet." /></>}
+      {result && !isLoading && !Object.entries(result).some(([key, value]) => key !== 'ok' && (Array.isArray(value) ? value.length > 0 : value !== null && value !== undefined && value !== false && value !== ''))
+        ? <><EuiSpacer /><EuiCallOut title="No results were returned." /></>
+        : result && !isLoading && <><EuiSpacer /><EuiCodeBlock language="json" isCopyable>{JSON.stringify(result, null, 2)}</EuiCodeBlock></>}
     </EuiPanel>
   </div>;
 };
