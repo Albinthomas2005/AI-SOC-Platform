@@ -1,6 +1,7 @@
 """Evidence-grounded assistant responses with role-filtered source loading."""
 
 import json
+import math
 from contextlib import closing
 
 from flask import jsonify, request
@@ -20,12 +21,52 @@ MAX_EVIDENCE_REFERENCES = 10
 MAX_QUESTION_CHARS = 2000
 NO_EVIDENCE_ANSWER = "I can't answer without accessible evidence."
 VALID_OBJECT_TYPES = {"alert", "report", "incident", "hunt"}
+INLINE_ALERT_FIELDS = (
+    "rule.id", "rule.description", "rule.level", "rule.groups",
+    "rule.mitre.id", "rule.mitre.tactic", "agent.name", "data.srcip",
+    "data.srcuser", "data.dstuser", "location",
+)
 
 
 def _safe_alert(value):
     if not isinstance(value, dict):
         return {}
     minimized = minimize_report_evidence(value, new_privacy_context())
+    return sanitize_alert(minimized, privacy_context=new_privacy_context())
+
+
+def _safe_inline_alert(value):
+    """Build evidence from only the Discover fields accepted by the UI contract."""
+    if not isinstance(value, dict):
+        return {}
+    minimized = {}
+    for path in INLINE_ALERT_FIELDS:
+        item = value
+        for part in path.split("."):
+            if not isinstance(item, dict) or part not in item:
+                item = None
+                break
+            item = item[part]
+        if isinstance(item, str):
+            item = item[:4096]
+            if not item.strip():
+                continue
+        elif isinstance(item, list):
+            item = [entry[:4096] if isinstance(entry, str) else entry
+                    for entry in item[:50]
+                    if isinstance(entry, (str, int, float, bool))]
+            if not item:
+                continue
+        elif (
+            not isinstance(item, (int, float, bool))
+            or isinstance(item, float) and not math.isfinite(item)
+        ):
+            continue
+        parts = path.split(".")
+        target = minimized
+        for part in parts[:-1]:
+            target = target.setdefault(part, {})
+        target[parts[-1]] = item
     return sanitize_alert(minimized, privacy_context=new_privacy_context())
 
 
@@ -171,7 +212,9 @@ def register_assistant_routes(app, auth_check):
         if username is None:
             return jsonify(ok=False, error="A valid signed-in user is required"), 400
         payload = request.get_json(silent=True) if request.is_json else None
-        if not isinstance(payload, dict) or set(payload) != {"question", "evidence"}:
+        if not isinstance(payload, dict) or set(payload) not in (
+            {"question", "evidence"}, {"question", "evidence", "alert"}
+        ):
             return jsonify(ok=False, error="Provide question and evidence references"), 400
         question = payload["question"]
         references = payload["evidence"]
@@ -193,7 +236,21 @@ def register_assistant_routes(app, auth_check):
             normalized.append(reference)
 
         role = database.get_soc_user_role(username)
-        evidence = load_accessible_evidence(normalized, username, role)
+        if "alert" in payload:
+            inline_alert = _safe_inline_alert(payload["alert"])
+            if (
+                len(normalized) != 1
+                or normalized[0]["type"] != "alert"
+                or not inline_alert
+                or not role_allowed(role, "L1")
+            ):
+                return jsonify(ok=False, error="Inline alert evidence is invalid or inaccessible"), 403
+            evidence = [{
+                "type": "alert", "id": normalized[0]["id"],
+                "data": {"alert": inline_alert},
+            }]
+        else:
+            evidence = load_accessible_evidence(normalized, username, role)
         if not evidence:
             return jsonify(ok=True, answer=NO_EVIDENCE_ANSWER, citations=[], refused=True)
         try:

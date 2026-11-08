@@ -8,7 +8,6 @@
     "data",
     "dashboard",
     "embeddable",
-    "discover",
     "inspector",
     "visualizations",
     "uiActions",
@@ -24,7 +23,8 @@
     "security",
     "securityDashboards",
     "searchguard",
-    "telemetry"
+    "telemetry",
+    "discover"
   ],
   "server": true,
   "ui": true

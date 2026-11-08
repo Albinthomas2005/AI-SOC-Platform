@@ -172,6 +172,32 @@ class AssistantApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
+    def test_inline_alert_is_minimized_and_cited_without_full_log(self):
+        alert_id = "sudo-alert-5501"
+        client, create = self.provider_client(
+            f"The alert records a sudo session [alert:{alert_id}]."
+        )
+        with patch("groq_service.Groq", return_value=client):
+            response = self.client.post(
+                "/api/assistant/chat",
+                json={
+                    "question": "Analyze this alert",
+                    "evidence": [{"type": "alert", "id": alert_id}],
+                    "alert": {
+                        "rule": {"id": "5501", "level": 3, "groups": ["pam", "syslog"]},
+                        "data": {"srcuser": "albin-thomas", "dstuser": "root"},
+                        "full_log": "RAW-LOG-MUST-NOT-REACH-ASSISTANT",
+                    },
+                },
+                headers=self.headers("assistant-l1"),
+            )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()["citations"], [{"type": "alert", "id": alert_id}])
+        prompt = create.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("5501", prompt)
+        self.assertIn("albin-thomas", prompt)
+        self.assertNotIn("RAW-LOG-MUST-NOT-REACH-ASSISTANT", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

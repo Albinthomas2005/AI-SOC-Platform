@@ -48,6 +48,7 @@ import { euiPaletteColorBlind } from '@elastic/eui';
 import NavigationService from './react-services/navigation-service';
 import { createHashHistory } from 'history';
 import { SUPPORTED_LANGUAGES_ARRAY } from '../common/constants';
+import { DiscoverAIAnalyst } from './components/discover-ai-analyst';
 
 export class WazuhPlugin
   implements
@@ -59,6 +60,12 @@ export class WazuhPlugin
     core: CoreSetup,
     plugins: WazuhSetupPlugins,
   ): Promise<WazuhSetup> {
+    plugins.discover?.docViews.addDocView({
+      title: 'AI Analyst',
+      order: 30,
+      component: DiscoverAIAnalyst,
+    });
+
     // Get custom logos configuration to start up the app with the correct logos
     let logosInitialState = {};
     try {
