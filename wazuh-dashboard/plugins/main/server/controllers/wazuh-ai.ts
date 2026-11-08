@@ -504,10 +504,7 @@ export class WazuhAiCtrl {
     if (!internalToken) {
       return response.custom({
         statusCode: 503,
-        body: {
-          ok: false,
-          error: 'AI report generation is temporarily unavailable',
-        },
+        body: { ok: false, error: 'Backend authentication failed', reason: 'bad_token' },
       });
     }
 
@@ -607,11 +604,31 @@ export class WazuhAiCtrl {
         typeof upstream.body.report !== 'string' ||
         !upstream.body.report.trim()
       ) {
+        const safeFailureReasons = [
+          'missing_api_key',
+          'provider_unreachable',
+          'timeout',
+          'rate_limited',
+          'bad_token',
+          'provider_error',
+        ];
+        const reason = safeFailureReasons.includes(upstream.body?.reason)
+          ? upstream.body.reason
+          : 'provider_error';
+        const safeErrors: Record<string, string> = {
+          missing_api_key: 'AI provider API key is not configured',
+          provider_unreachable: 'AI provider is unreachable',
+          timeout: 'AI provider request timed out',
+          rate_limited: 'AI provider rate limit was reached',
+          bad_token: 'Backend authentication failed',
+          provider_error: 'AI report generation failed',
+        };
         return response.custom({
           statusCode: 503,
           body: {
             ok: false,
-            error: 'AI report generation is temporarily unavailable',
+            error: safeErrors[reason],
+            reason,
           },
         });
       }
@@ -627,12 +644,16 @@ export class WazuhAiCtrl {
           decided_at: upstream.body.decided_at,
         },
       });
-    } catch {
+    } catch (error) {
+      const reason = /timeout/i.test(String((error as Error)?.name))
+        ? 'timeout'
+        : 'provider_unreachable';
       return response.custom({
         statusCode: 503,
         body: {
           ok: false,
-          error: 'AI report generation is temporarily unavailable',
+          error: reason === 'timeout' ? 'AI provider request timed out' : 'AI provider is unreachable',
+          reason,
         },
       });
     }

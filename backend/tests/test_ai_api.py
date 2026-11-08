@@ -436,6 +436,50 @@ class TestGenerateReportAPI(unittest.TestCase):
             response = self.post_report()
         self.assertEqual(response.status_code, 401)
 
+    def test_bad_token_failure_has_safe_reason_and_request_id(self):
+        response = self.post_report(headers={"Authorization": "Bearer wrong"})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["reason"], "bad_token")
+        self.assertTrue(response.headers.get("X-Request-ID"))
+        self.assertNotIn(b"wrong", response.data)
+
+    def test_provider_failure_reasons_are_specific_and_safe(self):
+        reasons = {
+            "missing_api_key": "AI provider API key is not configured",
+            "provider_unreachable": "AI provider is unreachable",
+            "timeout": "AI provider request timed out",
+            "rate_limited": "AI provider rate limit was reached",
+        }
+        for reason, message in reasons.items():
+            with self.subTest(reason=reason):
+                error = GroqUnavailable("private key prompt and provider details")
+                error.failure_reason = reason
+                with self.assertLogs("app", level="WARNING") as captured:
+                    with patch("app.generate_investigation_report", side_effect=error):
+                        response = self.post_report()
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.get_json()["reason"], reason)
+                self.assertEqual(response.get_json()["error"], message)
+                self.assertTrue(response.headers.get("X-Request-ID"))
+                self.assertIn(response.headers["X-Request-ID"], " ".join(captured.output))
+                self.assertIn(reason, " ".join(captured.output))
+                self.assertNotIn(b"private key", response.data)
+
+    def test_health_is_authenticated_and_reports_provider_state(self):
+        with patch("app.get_provider_health", return_value={
+            "provider_configured": True,
+            "provider_reachable": False,
+        }, create=True):
+            response = self.client.get("/api/ai/health", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {
+            "ok": True,
+            "provider_configured": True,
+            "provider_reachable": False,
+        })
+        unauthorized = self.client.get("/api/ai/health")
+        self.assertEqual(unauthorized.status_code, 401)
+
     def test_every_report_route_rejects_unauthenticated_requests(self):
         import re
 
@@ -718,6 +762,49 @@ class TestGenerateReportAPI(unittest.TestCase):
 
         self.assertEqual(create.call_args.kwargs["model"], "custom/model")
 
+    def test_provider_failures_are_classified_without_exposing_exception_text(self):
+        from types import SimpleNamespace
+        from groq_service import GroqUnavailable, _generate
+
+        class RateLimitError(Exception):
+            status_code = 429
+
+        class APITimeoutError(Exception):
+            pass
+
+        class APIConnectionError(Exception):
+            pass
+
+        failures = (
+            (RateLimitError("secret provider response"), "rate_limited"),
+            (APITimeoutError("secret prompt contents"), "timeout"),
+            (APIConnectionError("private endpoint"), "provider_unreachable"),
+        )
+        for failure, expected_reason in failures:
+            with self.subTest(reason=expected_reason):
+                create = Mock(side_effect=failure)
+                client = SimpleNamespace(
+                    chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+                )
+                with patch.dict(os.environ, {"GROQ_API_KEY": "synthetic-key"}), patch(
+                    "groq_service.Groq", return_value=client
+                ):
+                    with self.assertRaises(GroqUnavailable) as raised:
+                        _generate("synthetic prompt")
+                self.assertEqual(raised.exception.failure_reason, expected_reason)
+                self.assertNotIn("secret", str(raised.exception))
+
+    def test_missing_provider_key_has_a_specific_failure_reason(self):
+        from groq_service import GroqUnavailable, _generate
+
+        with patch.dict(os.environ, {"GROQ_API_KEY": ""}), patch(
+            "groq_service.Groq"
+        ) as provider:
+            with self.assertRaises(GroqUnavailable) as raised:
+                _generate("synthetic prompt")
+        self.assertEqual(raised.exception.failure_reason, "missing_api_key")
+        provider.assert_not_called()
+
     def test_reasoning_parameters_are_limited_to_gpt_oss_models(self):
         from types import SimpleNamespace
         from groq_service import _generate
@@ -841,6 +928,7 @@ class TestGenerateReportAPI(unittest.TestCase):
             response = self.post_report()
 
         self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["reason"], "provider_unreachable")
         self.assertNotIn(b"private provider detail", response.data)
 
     def test_unexpected_errors_return_safe_responses(self):

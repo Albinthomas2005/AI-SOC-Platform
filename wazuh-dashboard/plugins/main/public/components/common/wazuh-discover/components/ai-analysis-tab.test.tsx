@@ -81,11 +81,23 @@ describe('AIAnalysisTab', () => {
   );
 
   it('shows a safe error when report generation fails', async () => {
-    (WzRequest.genericReq as jest.Mock).mockRejectedValue(new Error('private token or URL'));
+    (WzRequest.genericReq as jest.Mock).mockRejectedValue({
+      response: { data: { error: 'AI provider API key is not configured' } },
+    });
     render(<AIAnalysisTab {...alertReference} />);
     fireEvent.click(screen.getByRole('button', { name: 'Generate AI report' }));
 
-    expect(await screen.findByText('AI report is unavailable. Check the backend connection and try again.')).toBeInTheDocument();
-    expect(screen.queryByText(/private token or URL/)).toBeNull();
+    expect(await screen.findByText('AI provider API key is not configured')).toBeInTheDocument();
+  });
+
+  it('does not show untrusted provider error text', async () => {
+    (WzRequest.genericReq as jest.Mock).mockRejectedValue({
+      response: { data: { error: 'secret=private-key' } },
+    });
+    render(<AIAnalysisTab {...alertReference} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate AI report' }));
+
+    expect(await screen.findByText('AI report generation failed. Check the backend connection and try again.')).toBeInTheDocument();
+    expect(screen.queryByText(/secret=private-key/)).toBeNull();
   });
 });

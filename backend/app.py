@@ -1,6 +1,7 @@
 
 import hmac
 import json
+import logging
 import os
 import re
 import threading
@@ -13,6 +14,7 @@ from dotenv import load_dotenv
 
 from flask import (
     Flask,
+    g,
     jsonify,
     request,
 )
@@ -41,6 +43,7 @@ from groq_service import (
     explain_alert,
     generate_investigation_report,
     summarize_correlation,
+    get_provider_health,
     GroqUnavailable,
     InvalidAIResponse,
 )
@@ -52,6 +55,27 @@ from privacy_filter import (
 )
 
 app = Flask(__name__)
+logger = logging.getLogger(__name__)
+
+SAFE_FAILURES = {
+    "missing_api_key": "AI provider API key is not configured",
+    "provider_unreachable": "AI provider is unreachable",
+    "timeout": "AI provider request timed out",
+    "rate_limited": "AI provider rate limit was reached",
+    "bad_token": "Backend authentication failed",
+    "provider_error": "AI report generation failed",
+}
+
+
+@app.before_request
+def assign_request_id():
+    g.request_id = uuid.uuid4().hex
+
+
+@app.after_request
+def add_request_id(response):
+    response.headers["X-Request-ID"] = getattr(g, "request_id", uuid.uuid4().hex)
+    return response
 
 
 def configured_max_request_bytes(value=None):
@@ -118,7 +142,16 @@ def enforce_request_rate_limit():
 
 @app.before_request
 def authorize_api_route():
-    return enforce_route_access(has_valid_internal_token)
+    result = enforce_route_access(has_valid_internal_token)
+    if (
+        result is not None
+        and request.path in ("/api/ai/generate-report", "/api/ai/health")
+        and result[1] == 401
+    ):
+        reason = "bad_token"
+        logger.warning("AI request failed request_id=%s reason=%s", g.request_id, reason)
+        return jsonify(ok=False, error=SAFE_FAILURES[reason], reason=reason), 401
+    return result
 
 
 def has_valid_internal_token():
@@ -367,16 +400,16 @@ def generate_report_api():
             request.headers.get("X-SOC-User", "local-analyst"),
             "report_generated", "ai_analysis", analysis_id, created_at,
         )
-    except GroqUnavailable:
-        return jsonify(
-            ok=False,
-            error="AI report generation is temporarily unavailable",
-        ), 503
+    except GroqUnavailable as error:
+        reason = getattr(error, "failure_reason", "provider_error")
+        if reason not in SAFE_FAILURES:
+            reason = "provider_error"
+        logger.warning("AI report failed request_id=%s reason=%s", g.request_id, reason)
+        return jsonify(ok=False, error=SAFE_FAILURES[reason], reason=reason), 503
     except Exception:
-        return jsonify(
-            ok=False,
-            error="AI report generation could not be completed",
-        ), 500
+        reason = "provider_error"
+        logger.error("AI report failed request_id=%s reason=%s", g.request_id, reason)
+        return jsonify(ok=False, error=SAFE_FAILURES[reason], reason=reason), 500
 
     return jsonify(
         ok=True,
@@ -388,6 +421,12 @@ def generate_report_api():
         decision_label="AI draft - not reviewed",
         decided_at=None,
     )
+
+
+@app.route("/api/ai/health", methods=["GET"])
+def ai_health_api():
+    provider_state = get_provider_health()
+    return jsonify(ok=True, **provider_state)
 
 
 @app.route("/api/ai/analysis/<analysis_id>/decision", methods=["POST"])

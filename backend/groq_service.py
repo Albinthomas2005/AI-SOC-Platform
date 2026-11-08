@@ -15,6 +15,10 @@ DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 class GroqUnavailable(Exception):
     """Raised when an AI response cannot be obtained."""
 
+    def __init__(self, message, failure_reason="provider_unreachable"):
+        super().__init__(message)
+        self.failure_reason = failure_reason
+
 
 class InvalidAIResponse(GroqUnavailable):
     """Raised when generated alert analysis does not meet its output contract."""
@@ -102,7 +106,7 @@ def _generate(prompt, system_prompt=None):
             api_key = os.environ.get("GROQ_API_KEY")
             if not api_key:
                 raise GroqUnavailable(
-                    "Groq API key is not configured. Set GROQ_API_KEY in .env."
+                    "Groq API key is not configured.", "missing_api_key"
                 )
             request_params["max_completion_tokens"] = 1024
             if model_name.startswith("openai/gpt-oss"):
@@ -131,11 +135,49 @@ def _generate(prompt, system_prompt=None):
 
     except GroqUnavailable:
         raise
-    except Exception:
+    except Exception as error:
+        error_name = type(error).__name__.casefold()
+        status_code = getattr(error, "status_code", None)
+        if status_code == 429 or "ratelimit" in error_name or "rate_limit" in error_name:
+            reason = "rate_limited"
+        elif isinstance(error, TimeoutError) or "timeout" in error_name:
+            reason = "timeout"
+        elif isinstance(error, (ConnectionError, OSError)) or "connection" in error_name:
+            reason = "provider_unreachable"
+        else:
+            reason = "provider_unreachable"
         raise GroqUnavailable(
             "AI provider request failed. Check the selected provider, model, "
-            "and local service availability."
+            "and local service availability.", failure_reason=reason
         ) from None
+
+
+def get_provider_health():
+    """Return a bounded configured/reachable check without exposing provider errors."""
+    provider_name = os.environ.get("SOC_AI_PROVIDER", "groq").strip().lower()
+    if provider_name == "groq":
+        api_key = os.environ.get("GROQ_API_KEY", "").strip()
+        if not api_key:
+            return {"provider_configured": False, "provider_reachable": False}
+        try:
+            Groq(api_key=api_key, timeout=3.0).models.list()
+            return {"provider_configured": True, "provider_reachable": True}
+        except Exception:
+            return {"provider_configured": True, "provider_reachable": False}
+    if provider_name == "ollama":
+        from urllib.request import urlopen
+
+        base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+        try:
+            provider = OllamaProvider(base_url)
+        except (TypeError, ValueError):
+            return {"provider_configured": False, "provider_reachable": False}
+        try:
+            with urlopen(f"{provider.base_url}/api/tags", timeout=3.0):
+                return {"provider_configured": True, "provider_reachable": True}
+        except Exception:
+            return {"provider_configured": True, "provider_reachable": False}
+    return {"provider_configured": False, "provider_reachable": False}
 
 
 def explain_alert(event):
