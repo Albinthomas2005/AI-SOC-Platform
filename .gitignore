@@ -29,6 +29,8 @@ coverage/
 *.log
 
 # Local data, editor and OS files
+backend/.env
+data/raw/
 *.db
 *.sqlite
 *.sqlite3
