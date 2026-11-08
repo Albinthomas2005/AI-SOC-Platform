@@ -5,7 +5,9 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "soc_alerts.db"
+DB_PATH = Path(
+    os.environ.get("SOC_AI_DB_PATH", Path(__file__).parent / "soc_alerts.db")
+).expanduser()
 
 
 def get_connection():

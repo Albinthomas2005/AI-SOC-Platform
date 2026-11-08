@@ -43,6 +43,20 @@ automate containment or replace analyst judgment.
    The installer requires a successful artifact workflow run ID and access to
    the target Dashboard installation; see its usage before installing.
 
+## Demo data
+
+Create a clearly labeled synthetic SSH sequence, sudo session, and resolved
+incident in a dedicated database:
+
+```bash
+PYTHON_DOTENV_DISABLED=1 backend/.venv/bin/python scripts/seed-demo.py
+SOC_AI_DB_PATH="$PWD/backend/soc_alerts-demo.db" PYTHON_DOTENV_DISABLED=1 backend/.venv/bin/python backend/app.py
+```
+
+The seed script refuses the normal `backend/soc_alerts.db` path. Add `--reset`
+to replace only its fixtures. The backend must receive `SOC_AI_DB_PATH` before
+startup to use the demo database.
+
 ## Problem and approach
 
 Wazuh provides alerts and investigation context, while an analyst may want a
