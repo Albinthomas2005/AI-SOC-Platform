@@ -29,6 +29,7 @@ coverage/
 *.log
 
 # Local data, editor and OS files
+data/raw/
 *.db
 *.sqlite
 *.sqlite3

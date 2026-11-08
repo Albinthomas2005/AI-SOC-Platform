@@ -1,36 +1,35 @@
 # Local MITRE ATT&CK catalog
 
-The complete Enterprise ATT&CK catalog is not bundled because it was not
-available offline for verification. The backend looks for
-`data/mitre_techniques.json`; without it, generated technique IDs are retained
-but explicitly marked unverified. With it, IDs absent from the catalog are
-removed and reported as invalid.
+The backend loads `data/mitre_techniques.json` to validate generated
+Enterprise ATT&CK technique IDs. IDs absent from the catalog are reported as
+invalid; without a usable catalog, IDs are explicitly marked unverified.
 
-To create the file from MITRE's official Enterprise ATT&CK STIX 2.1 bundle,
-download the `enterprise-attack.json` bundle from the `enterprise-attack`
-directory of MITRE's `attack-stix-data` repository, then convert it:
+The committed catalog is generated from the official Enterprise ATT&CK STIX
+2.1 bundle. The source bundle is kept locally at
+`data/raw/enterprise-attack.json` and is ignored by Git. To regenerate after
+updating that local source file, run this command from the repository root:
 
 ```bash
-curl -L \
-  https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/enterprise-attack/enterprise-attack.json \
-  -o /tmp/enterprise-attack.json
-cd /path/to/AI-SOC-Platform
-python3 backend/scripts/convert_attack_stix.py \
-  /tmp/enterprise-attack.json data/mitre_techniques.json
+python3 scripts/build_mitre_catalog.py \
+  data/raw/enterprise-attack.json data/mitre_techniques.json
 ```
 
-The converter keeps non-revoked, non-deprecated `attack-pattern` objects with
-a MITRE ATT&CK external ID and writes this format:
+The script includes non-revoked, non-deprecated Enterprise `attack-pattern`
+objects with a MITRE ATT&CK external ID, along with their names and tactic
+names. IDs are taken directly from STIX external references; the builder does
+not create or infer IDs. The generated format is:
 
 ```json
 {
   "source": "MITRE Enterprise ATT&CK STIX 2.1",
+  "source_bundle": "enterprise-attack.json",
+  "source_bundle_id": "bundle--...",
   "techniques": [
-    {"id": "T1059.001", "name": "PowerShell"}
+    {"id": "T1059.001", "name": "PowerShell", "tactics": ["Execution"]}
   ]
 }
 ```
 
-Do not edit or add technique entries by hand. Re-run the converter from an
-official bundle when updating the catalog. The generated catalog is local
-data; review its provenance and keep its source bundle/version recorded.
+Do not edit or add technique entries by hand. Re-run the builder from an
+official bundle when updating the catalog. Keep the source bundle ID with the
+generated catalog so its provenance can be traced.
