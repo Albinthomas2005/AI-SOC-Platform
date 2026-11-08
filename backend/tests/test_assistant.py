@@ -185,6 +185,7 @@ class AssistantApiTests(unittest.TestCase):
                     "evidence": [{"type": "alert", "id": alert_id}],
                     "alert": {
                         "rule": {"id": "5501", "level": 3, "groups": ["pam", "syslog"]},
+                        "agent": {"name": "internal-host01"},
                         "data": {"srcuser": "albin-thomas", "dstuser": "root"},
                         "full_log": "RAW-LOG-MUST-NOT-REACH-ASSISTANT",
                     },
@@ -196,6 +197,7 @@ class AssistantApiTests(unittest.TestCase):
         prompt = create.call_args.kwargs["messages"][1]["content"]
         self.assertIn("5501", prompt)
         self.assertIn("albin-thomas", prompt)
+        self.assertNotIn("internal-host01", prompt)
         self.assertNotIn("RAW-LOG-MUST-NOT-REACH-ASSISTANT", prompt)
 
 

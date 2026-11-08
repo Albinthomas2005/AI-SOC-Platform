@@ -50,6 +50,12 @@ class TestPrivacyFilter(unittest.TestCase):
         self.assertEqual(left, right)
         self.assertTrue(left.startswith("[NONPUBLIC_IP_"))
 
+    def test_pseudonymizes_non_global_reserved_and_shared_addresses(self):
+        result = sanitize_text("198.51.100.9 100.64.0.8")
+        self.assertNotIn("198.51.100.9", result)
+        self.assertNotIn("100.64.0.8", result)
+        self.assertEqual(result.count("[NONPUBLIC_IP_"), 2)
+
     def test_pseudonymizes_private_ipv6(self):
         result = sanitize_text("Source IP: fd12:3456:789a::1")
         self.assertNotIn("fd12:3456:789a::1", result)

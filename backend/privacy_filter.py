@@ -135,11 +135,7 @@ def _mask_address(address, privacy_context, original=None):
         if packed[:12] == (b"\x00" * 10 + b"\xff\xff"):
             mapped_address = ipaddress.IPv4Address(packed[12:])
     canonical_address = mapped_address or address
-    if (
-        canonical_address.is_private
-        or canonical_address.is_loopback
-        or canonical_address.is_link_local
-    ):
+    if not canonical_address.is_global:
         normalized = canonical_address.compressed.lower()
         addresses = privacy_context["addresses"]
         if normalized not in addresses:
@@ -150,8 +146,6 @@ def _mask_address(address, privacy_context, original=None):
             ).hexdigest()[:16]
             addresses[normalized] = f"[NONPUBLIC_IP_{digest}]"
         return addresses[normalized]
-    if not canonical_address.is_global:
-        return address.compressed if original is None else original
     return "[REDACTED_PUBLIC_IP]"
 
 

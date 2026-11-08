@@ -63,6 +63,8 @@ def _safe_inline_alert(value):
         ):
             continue
         parts = path.split(".")
+        if path == "agent.name":
+            item = "[REDACTED_HOST]"
         target = minimized
         for part in parts[:-1]:
             target = target.setdefault(part, {})
