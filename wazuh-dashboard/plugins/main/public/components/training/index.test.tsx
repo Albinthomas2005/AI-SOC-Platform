@@ -69,4 +69,25 @@ describe('TrainingPage', () => {
       { shouldRetry: false, checkCurrentApiIsUp: false },
     ));
   });
+
+  it('starts a timed eight-case shift without rendering hints', async () => {
+    const shiftScenarios = Array.from({ length: 8 }, (_, index) => ({
+      ...scenario, id: `shift-case-${index}`, title: `Shift case ${index + 1}`,
+    }));
+    (WzRequest.genericReq as jest.Mock).mockImplementation((method: string, path: string) => {
+      if (path === '/api/training/scenarios') return Promise.resolve({ data: { ok: true, scenarios: [scenario] } });
+      if (path === '/api/training/progress') return Promise.resolve({ data: { ok: true, progress: { attempts: [], attempt_count: 0 } } });
+      if (path.startsWith('/api/training/mitre')) return Promise.resolve({ data: { ok: true, techniques: [] } });
+      if (method === 'POST' && path === '/api/training/shifts') return Promise.resolve({ data: {
+        ok: true, shift_id: 'shift-id', duration_seconds: 1200,
+        deadline_at: new Date(Date.now() + 1200000).toISOString(), scenarios: shiftScenarios,
+      } });
+      return Promise.resolve({ data: { ok: true } });
+    });
+    render(<TrainingPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Start 8-case timed shift' }));
+    expect(await screen.findByText(/Shift in progress/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Hint \(free\)/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Shift case 1')).toBeInTheDocument();
+  });
 });

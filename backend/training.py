@@ -1,8 +1,9 @@
 """Server-side deterministic grading for synthetic analyst training scenarios."""
 
 import json
+import random
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import jsonify, request
@@ -14,6 +15,7 @@ from groq_service import (
     InvalidAIResponse,
     assess_training_scenario,
     coach_training_report,
+    coach_shift_handover,
 )
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "datasets" / "training"
@@ -21,6 +23,7 @@ VISIBLE_PATH = DATA_DIR / "scenarios.json"
 ANSWER_PATH = DATA_DIR / "answer-keys.json"
 VERDICTS = {"true_positive", "false_positive", "benign"}
 MAX_REPORT_CHARS = 12000
+SHIFT_DURATION_SECONDS = 20 * 60
 REPORT_SECTIONS = ("summary", "evidence", "actions", "unknowns")
 
 
@@ -100,6 +103,35 @@ def _grade(submission, key):
     }
 
 
+def _make_shift_queue(scenarios):
+    rng = random.SystemRandom()
+    by_difficulty = {level: [s for s in scenarios if s["difficulty"] == level] for level in range(1, 5)}
+    queue = [rng.choice(items) for items in by_difficulty.values() if items]
+    selected_ids = {item["id"] for item in queue}
+    remaining = [item for item in scenarios if item["id"] not in selected_ids]
+    rng.shuffle(remaining)
+    for scenario in remaining:
+        if len(queue) >= 8:
+            break
+        if scenario["category"] not in {item["category"] for item in queue}:
+            queue.append(scenario)
+    if len(queue) < 8:
+        remaining = [item for item in scenarios if item["id"] not in {q["id"] for q in queue}]
+        rng.shuffle(remaining)
+        queue.extend(remaining[:8 - len(queue)])
+    rng.shuffle(queue)
+    return queue[:8]
+
+
+def _public_shift_score(score):
+    clean = json.loads(json.dumps(score))
+    for field in ("verdict", "escalation"):
+        clean[field].pop("expected", None)
+    clean["mitre"].pop("accepted", None)
+    clean.pop("answer_status", None)
+    return clean
+
+
 def register_training_routes(app, has_valid_token):
     def authorized():
         if not has_valid_token():
@@ -133,6 +165,12 @@ def register_training_routes(app, has_valid_token):
             level = int(request.args.get("level", "1"))
         except ValueError:
             return jsonify(ok=False, error="Hint level must be an integer"), 400
+        user_id = request.args.get("user_id", "local-analyst")[:200]
+        active_shift = database.get_active_training_shift_for_scenario(
+            user_id, scenario_id, datetime.now(timezone.utc).isoformat()
+        )
+        if active_shift is not None:
+            return jsonify(ok=False, error="Hints are disabled during a timed shift"), 403
         scenario = next((s for s in _visible_scenarios() if s["id"] == scenario_id), None)
         key = next((k for k in _load(ANSWER_PATH) if k["id"] == scenario_id), None)
         if scenario is None or key is None:
@@ -320,3 +358,148 @@ def register_training_routes(app, has_valid_token):
             "field": row["field"], "ai_value": json.loads(row["ai_value"]),
             "expected_value": json.loads(row["expected_value"]), "created_at": row["created_at"],
         } for row in rows])
+
+    @app.post("/training/shifts")
+    def start_training_shift():
+        denied = authorized()
+        if denied:
+            return denied
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) - {"user_id"}:
+            return jsonify(ok=False, error="Invalid shift request"), 400
+        user_id = payload.get("user_id", "local-analyst")
+        if not isinstance(user_id, str) or not user_id or len(user_id) > 200:
+            return jsonify(ok=False, error="Invalid analyst identity"), 400
+        now = datetime.now(timezone.utc)
+        now_text = now.isoformat()
+        existing = database.get_active_training_shift(user_id, now_text)
+        if existing:
+            return jsonify(ok=False, error="Finish the active shift before starting another"), 409
+        queue = _make_shift_queue(_visible_scenarios())
+        if len(queue) != 8:
+            return jsonify(ok=False, error="Not enough scenarios are available for a shift"), 503
+        shift_id = uuid.uuid4().hex
+        deadline = now + timedelta(seconds=SHIFT_DURATION_SECONDS)
+        database.create_training_shift({
+            "shift_id": shift_id, "user_id": user_id, "started_at": now_text,
+            "deadline_at": deadline.isoformat(), "scenario_ids": [item["id"] for item in queue],
+        })
+        return jsonify(ok=True, shift_id=shift_id, started_at=now_text,
+                       deadline_at=deadline.isoformat(), duration_seconds=SHIFT_DURATION_SECONDS,
+                       scenarios=queue), 201
+
+    @app.post("/training/shifts/<shift_id>/responses")
+    def submit_training_shift_response(shift_id):
+        denied = authorized()
+        if denied:
+            return denied
+        payload = request.get_json(silent=True)
+        required = {"scenario_id", "verdict", "escalate", "mitre_ids", "report_text", "time_spent"}
+        if not isinstance(payload, dict) or set(payload) - (required | {"user_id"}) or not required.issubset(payload):
+            return jsonify(ok=False, error="Invalid shift response"), 400
+        user_id = payload.get("user_id", "local-analyst")
+        shift = database.get_training_shift(shift_id)
+        if shift is None or shift["user_id"] != user_id or shift["ended_at"] is not None:
+            return jsonify(ok=False, error="Active shift not found"), 404
+        now = datetime.now(timezone.utc)
+        if shift["deadline_at"] <= now.isoformat():
+            return jsonify(ok=False, error="Shift time has expired"), 409
+        scenario_ids = json.loads(shift["scenario_ids_json"])
+        if payload["scenario_id"] not in scenario_ids:
+            return jsonify(ok=False, error="Scenario is not in this shift"), 400
+        if any(row["scenario_id"] == payload["scenario_id"] for row in database.get_training_shift_responses(shift_id)):
+            return jsonify(ok=False, error="Scenario response already recorded"), 409
+        if not isinstance(payload["verdict"], str) or payload["verdict"] not in VERDICTS or not isinstance(payload["escalate"], bool):
+            return jsonify(ok=False, error="Invalid verdict or escalation value"), 400
+        if not isinstance(payload["mitre_ids"], list) or len(payload["mitre_ids"]) > 20 or not all(isinstance(v, str) for v in payload["mitre_ids"]):
+            return jsonify(ok=False, error="MITRE IDs must be a list of strings"), 400
+        if not isinstance(payload["report_text"], str) or len(payload["report_text"]) > MAX_REPORT_CHARS:
+            return jsonify(ok=False, error="Report text is invalid or too long"), 400
+        if type(payload["time_spent"]) is not int or not 0 <= payload["time_spent"] <= 86400:
+            return jsonify(ok=False, error="Time spent must be seconds between 0 and 86400"), 400
+        database.save_training_shift_response(shift_id, payload)
+        return jsonify(ok=True, recorded=True, remaining=len(scenario_ids) - len(database.get_training_shift_responses(shift_id)))
+
+    @app.post("/training/shifts/<shift_id>/complete")
+    def complete_training_shift(shift_id):
+        denied = authorized()
+        if denied:
+            return denied
+        payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict) or set(payload) - {"user_id"}:
+            return jsonify(ok=False, error="Invalid shift completion request"), 400
+        user_id = payload.get("user_id", "local-analyst")
+        shift = database.get_training_shift(shift_id)
+        if shift is None or shift["user_id"] != user_id:
+            return jsonify(ok=False, error="Shift not found"), 404
+        if shift["ended_at"] is not None:
+            return jsonify(ok=False, error="Shift is already complete"), 409
+        scenario_ids = json.loads(shift["scenario_ids_json"])
+        responses = {row["scenario_id"]: row for row in database.get_training_shift_responses(shift_id)}
+        now = datetime.now(timezone.utc)
+        timed_out = shift["deadline_at"] <= now.isoformat()
+        if len(responses) < len(scenario_ids) and not timed_out:
+            return jsonify(ok=False, error="Complete all shift cases or wait for the timer"), 409
+        scenarios = {item["id"]: item for item in _visible_scenarios()}
+        keys = {item["id"]: item for item in _load(ANSWER_PATH)}
+        results = []
+        stored_results = []
+        total_points = 0
+        for scenario_id in scenario_ids:
+            row = responses.get(scenario_id)
+            if row is None:
+                results.append({"scenario_id": scenario_id, "title": scenarios[scenario_id]["title"], "score": 0, "maximum": 100, "missing": True})
+                stored_results.append({"scenario_id": scenario_id, "score": 0, "maximum": 100, "missing": True})
+                continue
+            submission = {
+                "verdict": row["verdict"], "escalate": bool(row["escalate"]),
+                "mitre_ids": json.loads(row["mitre_ids_json"]), "report_text": row["report_text"],
+            }
+            score = _grade(submission, keys[scenario_id])
+            total_points += score["total"]
+            results.append({
+                "scenario_id": scenario_id, "title": scenarios[scenario_id]["title"],
+                "score": score["total"], "maximum": 100, "feedback": score,
+                "expected": {"verdict": score["verdict"]["expected"],
+                             "escalate": score["escalation"]["expected"],
+                             "mitre_ids": score["mitre"]["accepted"]},
+                "analyst": submission,
+            })
+            stored_results.append({"scenario_id": scenario_id, "score": _public_shift_score(score), "maximum": 100})
+        ended_at = now.isoformat()
+        summary = {
+            "case_count": len(scenario_ids), "completed_count": len(responses),
+            "timed_out": timed_out, "total_points": total_points,
+            "maximum_points": len(scenario_ids) * 100,
+            "average_score": total_points / len(scenario_ids), "cases": results,
+        }
+        database.finish_training_shift(shift_id, ended_at, {
+            "case_count": len(scenario_ids), "completed_count": len(responses),
+            "timed_out": timed_out, "total_points": total_points,
+            "maximum_points": len(scenario_ids) * 100,
+            "average_score": total_points / len(scenario_ids), "cases": stored_results,
+        })
+        return jsonify(ok=True, shift_id=shift_id, ended_at=ended_at, summary=summary)
+
+    @app.post("/training/shifts/<shift_id>/handover")
+    def submit_training_shift_handover(shift_id):
+        denied = authorized()
+        if denied:
+            return denied
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) - {"user_id", "note"}:
+            return jsonify(ok=False, error="Invalid handover request"), 400
+        user_id, note = payload.get("user_id", "local-analyst"), payload.get("note")
+        shift = database.get_training_shift(shift_id)
+        if shift is None or shift["user_id"] != user_id or shift["ended_at"] is None:
+            return jsonify(ok=False, error="Completed shift not found"), 404
+        if not isinstance(note, str) or not note.strip() or len(note) > 5000:
+            return jsonify(ok=False, error="Handover note must be between 1 and 5000 characters"), 400
+        try:
+            coaching = coach_shift_handover(note.strip())
+        except InvalidAIResponse as error:
+            return jsonify(ok=False, error=f"Handover coaching response failed validation: {error}"), 502
+        except GroqUnavailable:
+            return jsonify(ok=False, error="Handover coaching is temporarily unavailable"), 503
+        database.save_training_shift_handover(shift_id, note.strip(), coaching)
+        return jsonify(ok=True, shift_id=shift_id, coaching=coaching)

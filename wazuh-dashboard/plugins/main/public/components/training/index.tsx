@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   EuiBadge,
   EuiButton,
@@ -54,6 +54,15 @@ export const TrainingPage: React.FC = () => {
   const [coachingLoading, setCoachingLoading] = useState(false);
   const [error, setError] = useState(false);
   const [startedAt, setStartedAt] = useState(Date.now());
+  const [shift, setShift] = useState<any>();
+  const [shiftIndex, setShiftIndex] = useState(0);
+  const [shiftRemaining, setShiftRemaining] = useState(0);
+  const [shiftSummary, setShiftSummary] = useState<any>();
+  const [completedShiftId, setCompletedShiftId] = useState<string>();
+  const [handoverNote, setHandoverNote] = useState('');
+  const [handoverCoaching, setHandoverCoaching] = useState<any>();
+  const [handoverLoading, setHandoverLoading] = useState(false);
+  const finishingShift = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -89,6 +98,34 @@ export const TrainingPage: React.FC = () => {
   const categories = useMemo(() => Array.from(new Set(scenarios.map(s => s.category))).sort(), [scenarios]);
   const visible = scenarios.filter(s => (difficulty === 'all' || String(s.difficulty) === difficulty) && (category === 'all' || s.category === category));
 
+  const finishShift = useCallback(async (shiftId = shift?.shift_id) => {
+    if (!shiftId || finishingShift.current) return;
+    finishingShift.current = true;
+    try {
+      const response: any = await WzRequest.genericReq('POST', `/api/training/shifts/${shiftId}/complete`, {}, { shouldRetry: false, checkCurrentApiIsUp: false });
+      if (!response?.data?.ok) throw new Error('Invalid shift summary');
+      setShiftSummary(response.data.summary);
+      setCompletedShiftId(shiftId);
+      setShift(undefined);
+      setSelected(undefined);
+      setHandoverNote('');
+      setHandoverCoaching(undefined);
+    } catch { setError(true); }
+    finally { finishingShift.current = false; }
+  }, [shift]);
+
+  useEffect(() => {
+    if (!shift) return undefined;
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((Date.parse(shift.deadline_at) - Date.now()) / 1000));
+      setShiftRemaining(remaining);
+      if (remaining === 0) void finishShift(shift.shift_id);
+    };
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [shift, finishShift]);
+
   const selectScenario = (scenario: Scenario) => {
     setSelected(scenario);
     setResult(undefined);
@@ -103,13 +140,57 @@ export const TrainingPage: React.FC = () => {
   };
 
   const requestHint = async () => {
-    if (!selected) return;
+    if (!selected || shift) return;
     try {
       const next = hintLevel + 1;
       const response: any = await WzRequest.genericReq('GET', `/api/training/scenarios/${encodeURIComponent(selected.id)}/hints?level=${next}`, undefined, { shouldRetry: false, checkCurrentApiIsUp: false });
       setHints(response?.data?.hints || []);
       setHintLevel(next);
     } catch { setError(true); }
+  };
+
+  const startShift = async () => {
+    setError(false);
+    setShiftSummary(undefined);
+    setCompletedShiftId(undefined);
+    setResult(undefined);
+    try {
+      const response: any = await WzRequest.genericReq('POST', '/api/training/shifts', {}, { shouldRetry: false, checkCurrentApiIsUp: false });
+      if (!response?.data?.ok || !Array.isArray(response.data.scenarios) || response.data.scenarios.length !== 8) throw new Error('Invalid shift response');
+      setShift(response.data);
+      setShiftIndex(0);
+      setShiftRemaining(response.data.duration_seconds);
+      selectScenario(response.data.scenarios[0]);
+    } catch { setError(true); }
+  };
+
+  const recordShiftResponse = async () => {
+    if (!shift || !selected) return;
+    setError(false);
+    try {
+      const response: any = await WzRequest.genericReq('POST', `/api/training/shifts/${shift.shift_id}/responses`, {
+        scenario_id: selected.id, verdict, escalate, mitre_ids: mitreIds,
+        report_text: report, time_spent: Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
+      }, { shouldRetry: false, checkCurrentApiIsUp: false });
+      if (!response?.data?.ok) throw new Error('Shift response was not recorded');
+      const nextIndex = shiftIndex + 1;
+      if (nextIndex >= shift.scenarios.length) await finishShift(shift.shift_id);
+      else {
+        setShiftIndex(nextIndex);
+        selectScenario(shift.scenarios[nextIndex]);
+      }
+    } catch { setError(true); }
+  };
+
+  const submitHandover = async () => {
+    if (!shiftSummary || !completedShiftId) return;
+    setHandoverLoading(true);
+    try {
+      const response: any = await WzRequest.genericReq('POST', `/api/training/shifts/${completedShiftId}/handover`, { note: handoverNote }, { shouldRetry: false, checkCurrentApiIsUp: false });
+      if (!response?.data?.ok) throw new Error('Handover coaching unavailable');
+      setHandoverCoaching(response.data.coaching);
+    } catch { setError(true); }
+    finally { setHandoverLoading(false); }
   };
 
   const submitAttempt = async () => {
@@ -143,16 +224,26 @@ export const TrainingPage: React.FC = () => {
     <EuiPage paddingSize='l'><EuiPageBody><EuiPageContent paddingSize='l'>
       <EuiTitle size='l'><h1>Analyst Training</h1></EuiTitle>
       <EuiText size='s'><p>Work from the supplied synthetic evidence. Unverified facts are not yet verified.</p></EuiText>
+      <EuiButton fill onClick={() => void startShift()} isDisabled={!!shift}>Start 8-case timed shift</EuiButton>
+      {shift && <EuiCallOut title={`Shift in progress · ${Math.floor(shiftRemaining / 60)}:${String(shiftRemaining % 60).padStart(2, '0')} remaining`}><p>Case {shiftIndex + 1} of 8 · Hints are disabled during shifts.</p></EuiCallOut>}
       <EuiSpacer />
       {error && <EuiCallOut color='danger' title='Training service is unavailable. Try again.' />}
+      {shiftSummary && <EuiPanel>
+        <EuiTitle size='m'><h2>Shift summary · {Math.round(shiftSummary.average_score)}% ({shiftSummary.total_points}/{shiftSummary.maximum_points})</h2></EuiTitle>
+        <EuiText><p>Cases completed: {shiftSummary.completed_count}/8{shiftSummary.timed_out ? ' · Timer expired' : ''}</p></EuiText>
+        <ul>{shiftSummary.cases.map((item: any) => <li key={item.scenario_id}>{item.title} · {item.score}/100{item.missing ? ' · not submitted' : ''}</li>)}</ul>
+        <EuiFormRow label='Shift handover note'><EuiTextArea value={handoverNote} onChange={event => setHandoverNote(event.target.value)} rows={5} placeholder='Status, key evidence, unresolved items, and next owner/actions' /></EuiFormRow>
+        <EuiButton onClick={() => void submitHandover()} isLoading={handoverLoading} isDisabled={!handoverNote.trim()}>Get handover coaching</EuiButton>
+        {handoverCoaching && <EuiText><p><strong>Clarity:</strong> {handoverCoaching.clarity_feedback}</p><p><strong>Completeness:</strong> {handoverCoaching.completeness_feedback}</p><p><strong>Practise:</strong> {handoverCoaching.next_shift_practice}</p></EuiText>}
+      </EuiPanel>}
       <EuiFlexGroup gutterSize='l' responsive>
         <EuiFlexItem grow={1}>
           <EuiPanel>
             <EuiTitle size='s'><h2>Scenario queue</h2></EuiTitle>
-            <EuiFormRow label='Difficulty'><EuiSelect value={difficulty} options={[{ value: 'all', text: 'All difficulties' }, ...[1, 2, 3, 4].map(n => ({ value: String(n), text: `Difficulty ${n}` }))]} onChange={event => setDifficulty(event.target.value)} /></EuiFormRow>
-            <EuiFormRow label='Category'><EuiSelect value={category} options={[{ value: 'all', text: 'All categories' }, ...categories.map(value => ({ value, text: value.replace(/_/g, ' ') }))]} onChange={event => setCategory(event.target.value)} /></EuiFormRow>
+            <EuiFormRow label='Difficulty'><EuiSelect disabled={!!shift} value={difficulty} options={[{ value: 'all', text: 'All difficulties' }, ...[1, 2, 3, 4].map(n => ({ value: String(n), text: `Difficulty ${n}` }))]} onChange={event => setDifficulty(event.target.value)} /></EuiFormRow>
+            <EuiFormRow label='Category'><EuiSelect disabled={!!shift} value={category} options={[{ value: 'all', text: 'All categories' }, ...categories.map(value => ({ value, text: value.replace(/_/g, ' ') }))]} onChange={event => setCategory(event.target.value)} /></EuiFormRow>
             <ul aria-label='Training scenarios'>{visible.map(s => <li key={s.id}>
-              <EuiButton size='s' fill={selected?.id === s.id} onClick={() => selectScenario(s)}>{s.title}</EuiButton>{' '}
+              <EuiButton size='s' fill={selected?.id === s.id} isDisabled={!!shift} onClick={() => selectScenario(s)}>{s.title}</EuiButton>{' '}
               <EuiBadge>Level {s.difficulty}</EuiBadge>{' '}{completed.includes(s.id) && <EuiBadge color='success'>Completed</EuiBadge>}{' '}{s.status.includes('draft') && <EuiBadge color='warning'>Draft · needs review</EuiBadge>}
             </li>)}</ul>
             <EuiSpacer size='m' />
@@ -175,8 +266,8 @@ export const TrainingPage: React.FC = () => {
               {selected.evidence.log_lines.map((line, index) => <EuiText key={index}><p>{line}</p></EuiText>)}
               <EuiTitle size='s'><h3>Context notes</h3></EuiTitle>
               {selected.evidence.context_notes.map((note, index) => <EuiText key={index}><p>{note}</p></EuiText>)}
-              <EuiButton onClick={() => void requestHint()} isDisabled={hintLevel >= 3}>Hint (free) {hintLevel}/3</EuiButton>
-              {hints.map((hint, index) => <EuiText key={index}><p>Hint {index + 1}: {hint}</p></EuiText>)}
+              {!shift && <><EuiButton onClick={() => void requestHint()} isDisabled={hintLevel >= 3}>Hint (free) {hintLevel}/3</EuiButton>
+              {hints.map((hint, index) => <EuiText key={index}><p>Hint {index + 1}: {hint}</p></EuiText>)}</>}
             </EuiPanel>
             {!result && <EuiPanel>
               <EuiTitle size='m'><h2>Your assessment</h2></EuiTitle>
@@ -187,7 +278,7 @@ export const TrainingPage: React.FC = () => {
               <EuiFormRow label='Add a technique ID if the local catalog is unavailable'><EuiFlexGroup gutterSize='s'><EuiFlexItem><EuiFieldText value={manualTechnique} onChange={event => setManualTechnique(event.target.value)} placeholder='T1110.001' /></EuiFlexItem><EuiFlexItem grow={false}><EuiButton onClick={() => { if (manualTechnique.trim()) setMitreIds(ids => ids.includes(manualTechnique.trim()) ? ids : [...ids, manualTechnique.trim()]); setManualTechnique(''); }}>Add ID</EuiButton></EuiFlexItem></EuiFlexGroup></EuiFormRow>
               <EuiText size='s'><p>Selected: {mitreIds.join(', ') || 'None'}</p></EuiText>
               <EuiFormRow label='Short investigation report'><EuiTextArea value={report} onChange={event => setReport(event.target.value)} rows={8} placeholder={'Summary:\nEvidence:\nActions taken:\nUnknowns / not yet verified:'} /></EuiFormRow>
-              <EuiButton fill onClick={() => void submitAttempt()}>Submit assessment</EuiButton>
+              <EuiButton fill onClick={() => void (shift ? recordShiftResponse() : submitAttempt())}>{shift ? (shiftIndex === 7 ? 'Record and score shift' : 'Record decision and continue') : 'Submit assessment'}</EuiButton>
             </EuiPanel>}
             {result && <EuiPanel>
               <EuiTitle size='m'><h2>Your score: {result.score.total}/{result.score.maximum}</h2></EuiTitle>

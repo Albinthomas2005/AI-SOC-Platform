@@ -97,6 +97,31 @@ def init_db():
                 UNIQUE(attempt_id, field)
             )
         """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS training_shifts (
+                shift_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                deadline_at TEXT NOT NULL,
+                ended_at TEXT,
+                scenario_ids_json TEXT NOT NULL,
+                result_json TEXT,
+                handover_note TEXT,
+                handover_coaching_json TEXT
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS training_shift_responses (
+                shift_id TEXT NOT NULL,
+                scenario_id TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                escalate INTEGER NOT NULL CHECK (escalate IN (0, 1)),
+                mitre_ids_json TEXT NOT NULL,
+                report_text TEXT NOT NULL,
+                time_spent INTEGER NOT NULL,
+                PRIMARY KEY (shift_id, scenario_id)
+            )
+        """)
 
 
 def add_alert(timestamp, severity, rule, source_ip, status="New"):
@@ -230,6 +255,79 @@ def get_training_attempts_for_user(user_id):
                FROM training_attempts WHERE user_id = ? ORDER BY submitted_at DESC""",
             (user_id,),
         ).fetchall()
+
+
+def create_training_shift(shift):
+    with closing(get_connection()) as connection, connection:
+        connection.execute(
+            """INSERT INTO training_shifts
+               (shift_id, user_id, started_at, deadline_at, scenario_ids_json)
+               VALUES (?, ?, ?, ?, ?)""",
+            (shift["shift_id"], shift["user_id"], shift["started_at"],
+             shift["deadline_at"], json.dumps(shift["scenario_ids"])),
+        )
+
+
+def get_training_shift(shift_id):
+    with closing(get_connection()) as connection, connection:
+        return connection.execute(
+            "SELECT * FROM training_shifts WHERE shift_id = ?", (shift_id,)
+        ).fetchone()
+
+
+def get_active_training_shift_for_scenario(user_id, scenario_id, now):
+    with closing(get_connection()) as connection, connection:
+        rows = connection.execute(
+            """SELECT * FROM training_shifts WHERE user_id = ? AND ended_at IS NULL
+               AND deadline_at > ?""", (user_id, now)
+        ).fetchall()
+        return next((row for row in rows if scenario_id in json.loads(row["scenario_ids_json"])), None)
+
+
+def get_active_training_shift(user_id, now):
+    with closing(get_connection()) as connection, connection:
+        return connection.execute(
+            """SELECT * FROM training_shifts WHERE user_id = ? AND ended_at IS NULL
+               AND deadline_at > ? LIMIT 1""", (user_id, now)
+        ).fetchone()
+
+
+def save_training_shift_response(shift_id, response):
+    with closing(get_connection()) as connection, connection:
+        connection.execute(
+            """INSERT OR REPLACE INTO training_shift_responses
+               (shift_id, scenario_id, verdict, escalate, mitre_ids_json,
+                report_text, time_spent) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (shift_id, response["scenario_id"], response["verdict"],
+             int(response["escalate"]), json.dumps(response["mitre_ids"]),
+             response["report_text"], response["time_spent"]),
+        )
+
+
+def get_training_shift_responses(shift_id):
+    with closing(get_connection()) as connection, connection:
+        return connection.execute(
+            "SELECT * FROM training_shift_responses WHERE shift_id = ?", (shift_id,)
+        ).fetchall()
+
+
+def finish_training_shift(shift_id, ended_at, result):
+    with closing(get_connection()) as connection, connection:
+        cursor = connection.execute(
+            "UPDATE training_shifts SET ended_at = ?, result_json = ? WHERE shift_id = ? AND ended_at IS NULL",
+            (ended_at, json.dumps(result), shift_id),
+        )
+        return cursor.rowcount == 1
+
+
+def save_training_shift_handover(shift_id, note, coaching):
+    with closing(get_connection()) as connection, connection:
+        cursor = connection.execute(
+            """UPDATE training_shifts SET handover_note = ?, handover_coaching_json = ?
+               WHERE shift_id = ? AND ended_at IS NOT NULL""",
+            (note, json.dumps(coaching), shift_id),
+        )
+        return cursor.rowcount == 1
 
 
 if __name__ == "__main__":

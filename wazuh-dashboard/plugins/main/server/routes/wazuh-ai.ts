@@ -142,4 +142,44 @@ export function WazuhAiRoutes(router: IRouter) {
     (context, request, response) =>
       ctrl.proxyTraining(context, request, response, '/attempts', 'post'),
   );
+  router.post(
+    { path: '/api/training/shifts', validate: { body: schema.object({}) } },
+    (context, request, response) =>
+      ctrl.proxyTraining(context, request, response, '/shifts', 'post'),
+  );
+  router.post(
+    {
+      path: '/api/training/shifts/{id}/responses',
+      validate: {
+        params: schema.object({ id: schema.string() }),
+        body: schema.object({
+          scenario_id: schema.string(), verdict: schema.string(),
+          escalate: schema.boolean(), mitre_ids: schema.arrayOf(schema.string()),
+          report_text: schema.string(), time_spent: schema.number(),
+        }),
+      },
+      options: { body: { maxBytes: 256 * 1024 } },
+    },
+    (context, request, response) =>
+      ctrl.proxyTraining(context, request, response, `/shifts/${encodeURIComponent(request.params.id)}/responses`, 'post'),
+  );
+  router.post(
+    {
+      path: '/api/training/shifts/{id}/complete',
+      validate: { params: schema.object({ id: schema.string() }), body: schema.object({}) },
+    },
+    (context, request, response) =>
+      ctrl.proxyTraining(context, request, response, `/shifts/${encodeURIComponent(request.params.id)}/complete`, 'post'),
+  );
+  router.post(
+    {
+      path: '/api/training/shifts/{id}/handover',
+      validate: {
+        params: schema.object({ id: schema.string() }),
+        body: schema.object({ note: schema.string() }),
+      },
+    },
+    (context, request, response) =>
+      ctrl.proxyTraining(context, request, response, `/shifts/${encodeURIComponent(request.params.id)}/handover`, 'post'),
+  );
 }

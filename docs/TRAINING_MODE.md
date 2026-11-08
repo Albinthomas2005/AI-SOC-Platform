@@ -98,6 +98,14 @@ attempt history. AI disagreements are recorded separately and exposed through
 the token-protected `GET /training/ai-disagreements` endpoint for evaluation.
 They do not automatically edit scenarios or their answer keys.
 
+Timed shift mode selects eight mixed scenarios and starts a 20-minute timer.
+Hints are blocked for the active shift on both the page and backend. Decisions
+are stored in `training_shift_responses`; final shift scores and handover
+coaching are stored in `training_shifts`, separate from single-case attempts.
+An incomplete shift can be scored after its deadline, with unanswered cases
+scored as zero. After completion, the analyst can submit a handover note for
+schema-validated AI clarity and completeness coaching.
+
 ## What is not verified or built
 
 - All scenarios and evidence are synthetic; performance on real alerts is not
@@ -108,6 +116,8 @@ They do not automatically edit scenarios or their answer keys.
   installed.
 - The Dashboard tests and plugin build require the pinned Dashboard
   dependencies and have not been run in this workspace.
-- Timed shift mode and shift handover are not built yet.
+- Shift scoring and handover coaching have mocked backend tests; the plugin
+  shift screen test is written but not run because Dashboard dependencies are
+  missing.
 - Scenario-answer quality is not independently certified; no scenario is
   auto-edited from AI disagreement data.
