@@ -34,6 +34,17 @@ export function WazuhAiRoutes(router: IRouter) {
     (context, request, response) =>
       ctrl.analyzeAlert(context, request, response),
   );
+  router.post(
+    {
+      path: '/api/training/attempts/{id}/coaching',
+      validate: {
+        params: schema.object({ id: schema.string() }),
+        body: schema.object({}),
+      },
+    },
+    (context, request, response) =>
+      ctrl.proxyTraining(context, request, response, `/attempts/${encodeURIComponent(request.params.id)}/coaching`, 'post'),
+  );
 
   router.post(
     {

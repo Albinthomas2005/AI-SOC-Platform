@@ -5,6 +5,7 @@ import {
   EuiCallOut,
   EuiCodeBlock,
   EuiFieldSearch,
+  EuiFieldText,
   EuiFlexGroup,
   EuiFlexItem,
   EuiFormRow,
@@ -44,9 +45,12 @@ export const TrainingPage: React.FC = () => {
   const [escalate, setEscalate] = useState(true);
   const [report, setReport] = useState('');
   const [techniqueSearch, setTechniqueSearch] = useState('');
+  const [manualTechnique, setManualTechnique] = useState('');
   const [techniques, setTechniques] = useState<Technique[]>([]);
   const [mitreIds, setMitreIds] = useState<string[]>([]);
   const [result, setResult] = useState<any>();
+  const [coaching, setCoaching] = useState<any>();
+  const [coachingLoading, setCoachingLoading] = useState(false);
   const [error, setError] = useState(false);
   const [startedAt, setStartedAt] = useState(Date.now());
 
@@ -75,6 +79,7 @@ export const TrainingPage: React.FC = () => {
   const selectScenario = (scenario: Scenario) => {
     setSelected(scenario);
     setResult(undefined);
+    setCoaching(undefined);
     setHints([]);
     setHintLevel(0);
     setVerdict('true_positive');
@@ -109,6 +114,15 @@ export const TrainingPage: React.FC = () => {
       if (!response?.data?.ok) throw new Error('Invalid score response');
       setResult(response.data);
       setCompleted(current => current.includes(selected.id) ? current : [...current, selected.id]);
+      setCoachingLoading(true);
+      try {
+        const coached: any = await WzRequest.genericReq('POST', `/api/training/attempts/${response.data.attempt_id}/coaching`, {}, { shouldRetry: false, checkCurrentApiIsUp: false });
+        if (coached?.data?.ok) setCoaching(coached.data.coaching);
+      } catch {
+        setError(true);
+      } finally {
+        setCoachingLoading(false);
+      }
     } catch { setError(true); }
   };
 
@@ -151,6 +165,7 @@ export const TrainingPage: React.FC = () => {
               <EuiSwitch label='Escalate this alert' checked={escalate} onChange={event => setEscalate(event.target.checked)} />
               <EuiFormRow label='Search MITRE techniques'><EuiFieldSearch value={techniqueSearch} onChange={event => setTechniqueSearch(event.target.value)} placeholder='Search technique ID or name' /></EuiFormRow>
               {techniques.slice(0, 10).map(technique => <EuiButton key={technique.id} size='s' onClick={() => setMitreIds(ids => ids.includes(technique.id) ? ids : [...ids, technique.id])}>{technique.id} · {technique.name}</EuiButton>)}
+              <EuiFormRow label='Add a technique ID if the local catalog is unavailable'><EuiFlexGroup gutterSize='s'><EuiFlexItem><EuiFieldText value={manualTechnique} onChange={event => setManualTechnique(event.target.value)} placeholder='T1110.001' /></EuiFlexItem><EuiFlexItem grow={false}><EuiButton onClick={() => { if (manualTechnique.trim()) setMitreIds(ids => ids.includes(manualTechnique.trim()) ? ids : [...ids, manualTechnique.trim()]); setManualTechnique(''); }}>Add ID</EuiButton></EuiFlexItem></EuiFlexGroup></EuiFormRow>
               <EuiText size='s'><p>Selected: {mitreIds.join(', ') || 'None'}</p></EuiText>
               <EuiFormRow label='Short investigation report'><EuiTextArea value={report} onChange={event => setReport(event.target.value)} rows={8} placeholder={'Summary:\nEvidence:\nActions taken:\nUnknowns / not yet verified:'} /></EuiFormRow>
               <EuiButton fill onClick={() => void submitAttempt()}>Submit assessment</EuiButton>
@@ -160,6 +175,16 @@ export const TrainingPage: React.FC = () => {
               <EuiText><p>Verdict: {result.score.verdict.points}/40 · Escalation: {result.score.escalation.points}/20 · MITRE: {result.score.mitre.points}/20 · Report: {result.score.report.points}/20</p></EuiText>
               <EuiText><p>Verdict {result.score.verdict.correct === null ? 'not graded: review needed' : result.score.verdict.correct ? 'correct' : 'review the expected verdict'}; escalation {result.score.escalation.correct === null ? 'not graded' : result.score.escalation.correct ? 'correct' : 'needs review'}; invalid MITRE IDs: {result.score.mitre.invalid.join(', ') || 'none'}.</p></EuiText>
               <EuiTitle size='s'><h3>Coaching explanation</h3></EuiTitle><EuiText><p>{result.explanation}</p></EuiText>
+              <EuiTitle size='s'><h3>Analyst vs AI vs expected</h3></EuiTitle>
+              <EuiFlexGroup>
+                <EuiFlexItem><EuiPanel><strong>Analyst</strong><p>{result.analyst.verdict} · {result.analyst.escalate ? 'escalate' : 'close'}</p><p>MITRE: {result.analyst.mitre_ids.join(', ') || 'none'}</p></EuiPanel></EuiFlexItem>
+                <EuiFlexItem><EuiPanel><strong>AI assessment</strong><p>{result.ai ? `${result.ai.verdict} · ${result.ai.escalate ? 'escalate' : 'close'}` : 'AI assessment unavailable'}</p><p>MITRE: {result.ai?.mitre_ids?.join(', ') || 'none'}</p></EuiPanel></EuiFlexItem>
+                <EuiFlexItem><EuiPanel><strong>Expected</strong><p>{result.expected.verdict || 'not yet reviewed'} · {result.expected.escalate === null ? 'not yet reviewed' : result.expected.escalate ? 'escalate' : 'close'}</p><p>MITRE: {result.expected.mitre_ids.join(', ') || 'not yet reviewed / none'}</p></EuiPanel></EuiFlexItem>
+              </EuiFlexGroup>
+              <EuiTitle size='s'><h3>Report coaching</h3></EuiTitle>
+              {coachingLoading && <EuiText><p>Preparing coaching…</p></EuiText>}
+              {coaching && <EuiText><p><strong>Good:</strong> {coaching.what_was_good}</p><p><strong>Missed:</strong> {coaching.what_was_missed}</p><p><strong>Practise:</strong> {coaching.one_thing_to_practise}</p></EuiText>}
+              {!coachingLoading && !coaching && <EuiText><p>AI coaching is unavailable right now.</p></EuiText>}
               <EuiButton fill onClick={() => { const next = visible.find(item => item.id !== selected.id && !completed.includes(item.id)); if (next) selectScenario(next); else { setSelected(undefined); setResult(undefined); } }}>Next scenario</EuiButton>
             </EuiPanel>}
           </>}

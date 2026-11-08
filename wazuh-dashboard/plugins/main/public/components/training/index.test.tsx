@@ -25,6 +25,10 @@ describe('TrainingPage', () => {
       if (path === '/api/training/scenarios') return Promise.resolve({ data: { ok: true, scenarios: [scenario] } });
       if (path.startsWith('/api/training/mitre')) return Promise.resolve({ data: { ok: true, techniques: [{ id: 'T1110.001', name: 'Password Guessing' }] } });
       if (path.includes('/hints')) return Promise.resolve({ data: { ok: true, hints: ['Count failures'], score_impact: 0 } });
+      if (path.includes('/coaching')) return Promise.resolve({ data: { ok: true, coaching: {
+        what_was_good: 'Cited the event', what_was_missed: 'No related logs',
+        one_thing_to_practise: 'State the unknowns',
+      } } });
       if (method === 'POST') return Promise.resolve({ data: {
         ok: true,
         score: {
@@ -33,6 +37,10 @@ describe('TrainingPage', () => {
           mitre: { points: 20, invalid: [] }, report: { points: 20 },
         },
         explanation: 'Expected practice note',
+        attempt_id: 'training-attempt-id',
+        analyst: { verdict: 'true_positive', escalate: true, mitre_ids: ['T1110.001'] },
+        ai: { verdict: 'true_positive', escalate: true, mitre_ids: ['T1110.001'] },
+        expected: { verdict: 'true_positive', escalate: true, mitre_ids: ['T1110.001'] },
       } });
       return Promise.resolve({ data: { ok: true } });
     });
@@ -55,6 +63,7 @@ describe('TrainingPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit assessment' }));
     expect(await screen.findByText('Your score: 100/100')).toBeInTheDocument();
     expect(screen.getByText('Expected practice note')).toBeInTheDocument();
+    expect(await screen.findByText('Cited the event')).toBeInTheDocument();
     await waitFor(() => expect(WzRequest.genericReq).toHaveBeenCalledWith(
       'POST', '/api/training/attempts', expect.objectContaining({ scenario_id: scenario.id }),
       { shouldRetry: false, checkCurrentApiIsUp: false },
