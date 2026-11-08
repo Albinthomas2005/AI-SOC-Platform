@@ -4,7 +4,6 @@ import {
   EuiCallOut,
   EuiFlexGroup,
   EuiFlexItem,
-  EuiMarkdownFormat,
   EuiPanel,
   EuiSpacer,
   EuiText,
@@ -143,7 +142,11 @@ export const AIAnalysisTab = ({ index, id }: AIAnalysisTabProps) => {
             <EuiSpacer size='s' />
             {isEditing ? (
               <EuiTextArea aria-label='Edit AI report' fullWidth rows={12} value={editedReport} onChange={event => setEditedReport(event.target.value)} />
-            ) : <EuiMarkdownFormat>{report}</EuiMarkdownFormat>}
+            ) : (
+              <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {report}
+              </pre>
+            )}
             <EuiSpacer size='s' />
             <EuiTextArea aria-label='Analyst decision note' placeholder='Optional analyst note' fullWidth rows={2} value={decisionNote} onChange={event => setDecisionNote(event.target.value)} />
             <EuiSpacer size='s' />
