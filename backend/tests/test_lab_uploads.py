@@ -104,12 +104,19 @@ class LabUploadTests(unittest.TestCase):
                 "title": "Windows sample", "platform": "windows",
             })
         self.assertEqual(response.status_code, 400)
+        self.assertEqual(len(captured.output), 1)
         log_line = " ".join(captured.output)
-        self.assertIn("status=400", log_line)
-        self.assertIn("reason=Windows event logs are unsupported", log_line)
+        self.assertIn("status=received", log_line)
+        self.assertIn("reason=request_received", log_line)
         self.assertRegex(log_line, r"upload_id=[0-9a-f]{32}")
         self.assertNotIn(secret_content, log_line)
         self.assertNotIn("lab-test-token", log_line)
+
+    def test_append_permission_error_returns_clear_500(self):
+        with patch.object(lab_uploads, "_append", side_effect=PermissionError):
+            response = self.upload()
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("check backend service permissions", response.get_json()["message"])
 
     def test_rejects_binary_null_public_ip_and_limits(self):
         for value in (b"abc\x00def\n", b"\xff\xfe", b"GET / from 8.8.8.8\n"):

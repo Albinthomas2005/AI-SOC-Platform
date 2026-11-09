@@ -29,13 +29,14 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
-The dashboard server also needs the same internal token. Store it in the
-root-owned file `/etc/wazuh-dashboard-soc-ai.env` with mode `600`; do not put a
-different token in the dashboard environment. The value must match
-`SOC_AI_INTERNAL_TOKEN` in `backend/.env`.
+The dashboard server also needs the backend URL and same internal token. Store
+them in the root-owned file `/etc/wazuh-dashboard/soc-ai.env` with mode `600`;
+do not put a different token in the dashboard environment. The token must
+match `SOC_AI_INTERNAL_TOKEN` in the backend environment.
 
 ```ini
-# /etc/wazuh-dashboard-soc-ai.env (example placeholder only)
+# /etc/wazuh-dashboard/soc-ai.env (example placeholder only)
+SOC_AI_BASE_URL=http://127.0.0.1:5000
 SOC_AI_INTERNAL_TOKEN=replace-with-the-same-local-token
 ```
 
@@ -43,9 +44,11 @@ The dashboard systemd drop-in can reference the protected environment file:
 
 ```ini
 [Service]
-EnvironmentFile=/etc/wazuh-dashboard-soc-ai.env
+EnvironmentFile=/etc/wazuh-dashboard/soc-ai.env
 ```
 
-Configure these examples for the local installation before using them. Keep
-the backend bound to loopback unless deployment-specific network protections
-have been reviewed.
+Configure these examples for the local installation before using them, then
+reload systemd and restart OpenSearch Dashboards so the process receives the
+environment. The plugin reads these process environment values when handling
+each request, not at module load. Keep the backend bound to loopback unless
+deployment-specific network protections have been reviewed.

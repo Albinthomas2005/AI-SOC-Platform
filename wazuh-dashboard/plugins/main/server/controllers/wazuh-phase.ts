@@ -18,8 +18,8 @@ type NeedleCall = (method: string, url: string, data: unknown, options: NeedleOp
 // Needle does not ship TypeScript declarations.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const needle = require('needle') as NeedleCall;
-const BASE_URL = `http://${process.env.SOC_AI_HOST || '127.0.0.1'}:${process.env.SOC_AI_PORT || '5000'}`;
-const TOKEN = () => process.env.SOC_AI_INTERNAL_TOKEN;
+const UPLOAD_BUILD = 'upload-diagnose-1';
+const UPLOAD_REQUEST_MAX_BYTES = 1024 * 1024 + 64 * 1024;
 const TIMEOUT_MS = 45000;
 const ALERT_FIELDS = [
   '@timestamp', 'timestamp', 'rule.id', 'rule.level', 'rule.description',
@@ -57,6 +57,36 @@ function errorBody(message: string) {
   return { ok: false, error: message, message };
 }
 
+type UploadDiagnostic = { build: string; log: (stage: string, reason: string) => void };
+
+function backendUrl(): string | undefined {
+  const explicit = process.env.SOC_AI_BASE_URL?.trim();
+  const host = process.env.SOC_AI_HOST?.trim();
+  const port = process.env.SOC_AI_PORT?.trim();
+  if (!explicit && !host && !port) return undefined;
+  const raw = explicit || `http://${host || '127.0.0.1'}:${port || '5000'}`;
+  try {
+    const parsed = new URL(raw);
+    if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password || parsed.search || parsed.hash || (parsed.pathname !== '/' && parsed.pathname !== '')) return undefined;
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return undefined;
+  }
+}
+
+function customResponse(
+  response: OpenSearchDashboardsResponseFactory,
+  statusCode: number,
+  body: Record<string, unknown>,
+  diagnostic?: UploadDiagnostic,
+) {
+  return response.custom({
+    statusCode,
+    body,
+    ...(diagnostic ? { headers: { 'x-soc-ai-build': diagnostic.build } } : {}),
+  });
+}
+
 export class WazuhPhaseCtrl {
   private async currentUsername(context: RequestHandlerContext, request: OpenSearchDashboardsRequest): Promise<string | undefined> {
     try {
@@ -73,11 +103,20 @@ export class WazuhPhaseCtrl {
     body: unknown,
     username: string,
     response: OpenSearchDashboardsResponseFactory,
+    diagnostic?: UploadDiagnostic,
   ) {
-    const token = TOKEN();
-    if (!token) return response.custom({ statusCode: 503, body: errorBody('SOC AI service is unavailable') });
+    const token = process.env.SOC_AI_INTERNAL_TOKEN?.trim();
+    if (!token) {
+      diagnostic?.log('config', 'backend_token_not_configured');
+      return customResponse(response, 503, errorBody('backend token not configured'), diagnostic);
+    }
+    const baseUrl = backendUrl();
+    if (!baseUrl) {
+      diagnostic?.log('config', 'backend_url_not_configured');
+      return customResponse(response, 503, errorBody('backend URL not configured'), diagnostic);
+    }
     try {
-      const upstream = await needle(method, `${BASE_URL}${path}`, body, {
+      const upstream = await needle(method, `${baseUrl}${path}`, body, {
         json: true,
         headers: { Authorization: `Bearer ${token}`, 'X-SOC-User': username },
         // eslint-disable-next-line camelcase
@@ -95,14 +134,68 @@ export class WazuhPhaseCtrl {
         const statusCode = typeof upstream.statusCode === 'number'
           ? (upstream.statusCode < 200 || upstream.statusCode >= 300 ? upstream.statusCode : 502)
           : 502;
-        return response.custom({
-          statusCode,
-          body: errorBody(backendErrorMessage(upstream.body, token, upstream.statusCode)),
-        });
+        diagnostic?.log('backend_response', `http_${statusCode}_error`);
+        return customResponse(response, statusCode, errorBody(backendErrorMessage(upstream.body, token, upstream.statusCode)), diagnostic);
+      }
+      if (diagnostic) {
+        const statusCode = upstream.statusCode || 200;
+        diagnostic.log('backend_response', `http_${statusCode}_success`);
+        return customResponse(response, statusCode, upstream.body, diagnostic);
       }
       return response.ok({ body: upstream.body });
     } catch {
-      return response.custom({ statusCode: 503, body: errorBody('backend unreachable') });
+      diagnostic?.log('backend_request', 'transport_or_response_error');
+      return customResponse(response, 503, errorBody('backend unreachable'), diagnostic);
+    }
+  }
+
+  async uploadLab(
+    context: RequestHandlerContext,
+    request: OpenSearchDashboardsRequest,
+    response: OpenSearchDashboardsResponseFactory,
+  ) {
+    const diagnostic: UploadDiagnostic = {
+      build: UPLOAD_BUILD,
+      log: (stage, reason) => {
+        try {
+          context.wazuh.logger.error(`lab upload stage=${stage} reason=${reason}`);
+        } catch { /* Request logging must not prevent an error response. */ }
+      },
+    };
+    try {
+      const username = await this.currentUsername(context, request);
+      if (!username) {
+        diagnostic.log('auth', 'signed_in_user_unavailable');
+        return customResponse(response, 401, errorBody('Authentication required'), diagnostic);
+      }
+      let payload: unknown = request.body;
+      if (Buffer.isBuffer(payload)) {
+        if (payload.byteLength > UPLOAD_REQUEST_MAX_BYTES) {
+          diagnostic.log('request_parse', 'payload_too_large');
+          return customResponse(response, 413, errorBody('Upload request exceeds the 1 MiB file limit'), diagnostic);
+        }
+        payload = payload.toString('utf8');
+      }
+      if (typeof payload === 'string') {
+        if (Buffer.byteLength(payload, 'utf8') > UPLOAD_REQUEST_MAX_BYTES) {
+          diagnostic.log('request_parse', 'payload_too_large');
+          return customResponse(response, 413, errorBody('Upload request exceeds the 1 MiB file limit'), diagnostic);
+        }
+        try {
+          payload = JSON.parse(payload);
+        } catch {
+          diagnostic.log('request_parse', 'invalid_json');
+          return customResponse(response, 400, errorBody('Upload request must contain valid JSON'), diagnostic);
+        }
+      }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        diagnostic.log('request_parse', 'json_object_required');
+        return customResponse(response, 400, errorBody('Upload request must be a JSON object'), diagnostic);
+      }
+      return await this.backend('post', '/api/lab/uploads', payload, username, response, diagnostic);
+    } catch {
+      diagnostic.log('handler', 'unexpected_handler_error');
+      return customResponse(response, 500, errorBody('Upload request could not be processed'), diagnostic);
     }
   }
 
