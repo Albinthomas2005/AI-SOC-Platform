@@ -43,6 +43,16 @@ function validAlertRef(index: unknown, id: unknown, pattern: unknown): boolean {
   return new RegExp(`^${escaped}$`).test(index);
 }
 
+function backendErrorMessage(body: Record<string, any> | undefined, token: string, statusCode?: number) {
+  const supplied = typeof body?.error === 'string'
+    ? body.error
+    : typeof body?.message === 'string' ? body.message : '';
+  if (!supplied.trim()) return statusCode ? `Backend returned HTTP ${statusCode}` : 'Invalid backend response';
+  return supplied
+    .replace(token ? new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g') : /$^/, '[redacted]')
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]');
+}
+
 export class WazuhPhaseCtrl {
   private async currentUsername(context: RequestHandlerContext, request: OpenSearchDashboardsRequest): Promise<string | undefined> {
     try {
@@ -78,14 +88,17 @@ export class WazuhPhaseCtrl {
         upstream.statusCode < 200 || upstream.statusCode >= 300 ||
         upstream.body?.ok !== true
       ) {
+        const statusCode = typeof upstream.statusCode === 'number'
+          ? (upstream.statusCode < 200 || upstream.statusCode >= 300 ? upstream.statusCode : 502)
+          : 502;
         return response.custom({
-          statusCode: upstream.statusCode && upstream.statusCode >= 400 && upstream.statusCode < 500 ? upstream.statusCode : 503,
-          body: upstream.body?.ok === false ? upstream.body : { ok: false, error: 'SOC AI service is unavailable' },
+          statusCode,
+          body: { ok: false, error: backendErrorMessage(upstream.body, token, upstream.statusCode) },
         });
       }
       return response.ok({ body: upstream.body });
     } catch {
-      return response.custom({ statusCode: 503, body: { ok: false, error: 'SOC AI service is unavailable' } });
+      return response.custom({ statusCode: 503, body: { ok: false, error: 'backend unreachable' } });
     }
   }
 
