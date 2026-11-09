@@ -1,7 +1,6 @@
 """Safe append-only ingestion of lab logs into Wazuh monitored files."""
 import ipaddress
 import json
-import logging
 import os
 import re
 import stat
@@ -15,8 +14,6 @@ from flask import g, jsonify, request
 
 import database
 from roles_audit import request_username
-
-logger = logging.getLogger(__name__)
 
 SAMPLES = Path(__file__).parent / "lab_samples"
 MAX_BYTES = 1024 * 1024
@@ -184,7 +181,8 @@ def register_lab_routes(app):
         try:
             _append(path, [f"# SOCLAB-INJECT upload={upload_id}", *rows])
         except OSError:
-            return None, (jsonify(ok=False, error="Target file could not be appended"), 400)
+            message = "Cannot write the upload log file; check backend service permissions"
+            return None, (jsonify(ok=False, error=message, message=message), 500)
         uploaded_at = _now()
         with closing(database.get_connection()) as connection, connection:
             connection.execute("INSERT INTO lab_uploads VALUES (?, ?, ?, ?, ?, ?)",
@@ -260,7 +258,6 @@ def register_lab_routes(app):
                 return error
             return jsonify(ok=True, upload=result), 201
         except Exception:
-            logger.exception("Lab upload failed status=500 reason=metadata_or_route_error upload_id=%s", upload_id)
             return jsonify(ok=False, error="Lab upload could not be completed", message="Lab upload could not be completed"), 500
 
     @app.post("/api/lab/samples/<name>")
@@ -276,5 +273,4 @@ def register_lab_routes(app):
                 return error
             return jsonify(ok=True, upload=result), 201
         except Exception:
-            logger.exception("Lab sample upload failed status=500 reason=sample_or_metadata_error upload_id=%s", upload_id)
             return jsonify(ok=False, error="Sample upload could not be completed", message="Sample upload could not be completed"), 500
