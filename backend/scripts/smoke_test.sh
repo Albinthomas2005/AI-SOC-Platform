@@ -5,7 +5,7 @@ set -u
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 backend_dir=$(cd -- "$script_dir/.." && pwd)
 env_file="$backend_dir/.env"
-port=${1:-5000}
+port=${1:-${SOC_AI_PORT:-5000}}
 base_url="http://127.0.0.1:${port}"
 
 if ! [[ "$port" =~ ^[0-9]+$ ]] || ((port < 1 || port > 65535)); then

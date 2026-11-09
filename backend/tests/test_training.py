@@ -55,11 +55,16 @@ class TrainingApiTests(unittest.TestCase):
         return self.client.post("/training/attempts", json=payload, headers=HEADERS)
 
     def test_auth_required_for_all_training_resources(self):
-        for path in ("/training/scenarios", "/training/scenarios/ssh-brute-force", "/training/scenarios/ssh-brute-force/hints?level=1"):
-            self.assertEqual(self.client.get(path).status_code, 401)
-        self.assertEqual(self.client.post("/training/attempts", json={}).status_code, 401)
-        self.assertEqual(self.client.post("/training/attempts/id/coaching", json={}).status_code, 401)
-        self.assertEqual(self.client.get("/training/ai-disagreements").status_code, 401)
+        import re
+
+        routes = [rule for rule in app.url_map.iter_rules() if rule.rule.startswith("/training/")]
+        self.assertTrue(routes)
+        for route in routes:
+            path = re.sub(r"<[^>]+>", "test-id", route.rule)
+            method = "GET" if "GET" in route.methods else "POST"
+            with self.subTest(method=method, path=path):
+                response = self.client.open(path, method=method, json={})
+                self.assertEqual(response.status_code, 401)
 
     def test_answer_keys_absent_from_visible_responses(self):
         for response in (
@@ -178,6 +183,37 @@ class TrainingApiTests(unittest.TestCase):
         self.assertEqual(coach.call_args.args[0], COMPLETE_REPORT)
         self.assertIsNotNone(database.get_training_attempt(submitted["attempt_id"])["coaching_json"])
 
+    def test_training_report_secrets_tokens_and_pii_are_removed_before_provider(self):
+        submitted = self.submit(
+            report_text=(
+                "Summary: analyst@example.invalid Bearer synthetic-report-token "
+                "password=synthetic-password. Evidence: 8.8.8.8. "
+                "Actions: reviewed. Unknowns: not yet verified."
+            )
+        ).get_json()
+        coaching = json.dumps({
+            "what_was_good": "Evidence was cited",
+            "what_was_missed": "Scope was missing",
+            "one_thing_to_practise": "State an unknown",
+        })
+        with patch("groq_service._generate", return_value=coaching) as provider:
+            response = self.client.post(
+                f"/training/attempts/{submitted['attempt_id']}/coaching",
+                json={}, headers=HEADERS,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        prompt = provider.call_args.args[0]
+        for value in (
+            "analyst@example.invalid", "synthetic-report-token",
+            "synthetic-password", "8.8.8.8",
+        ):
+            self.assertNotIn(value, prompt)
+        self.assertIn("[REDACTED_EMAIL]", prompt)
+        self.assertIn("[REDACTED_TOKEN]", prompt)
+        self.assertIn("[REDACTED_SECRET]", prompt)
+        self.assertIn("[REDACTED_PUBLIC_IP]", prompt)
+
     def test_untrusted_training_coaching_prompt_and_output_schema_validation(self):
         from groq_service import InvalidAIResponse, coach_training_report
         generated = json.dumps({
@@ -279,26 +315,37 @@ class TrainingApiTests(unittest.TestCase):
 
     def test_shift_handover_coaching_uses_mocked_provider_and_persists_separately(self):
         import database
-        import training
         shift = self.start_shift().get_json()
         self.submit_all_shift_cases(shift)
-        self.client.post(f"/training/shifts/{shift['shift_id']}/complete", json={}, headers=HEADERS)
-        coaching = {
+        completed = self.client.post(
+            f"/training/shifts/{shift['shift_id']}/complete", json={}, headers=HEADERS
+        )
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.get_json()["summary"]["case_count"], 8)
+        self.assertEqual(completed.get_json()["summary"]["completed_count"], 8)
+        coaching = json.dumps({
             "clarity_feedback": "The status is clear.",
             "completeness_feedback": "List unresolved work explicitly.",
             "next_shift_practice": "Name the next owner.",
-        }
-        with patch.object(training, "coach_shift_handover", return_value=coaching) as provider:
+        })
+        note = "Synthetic handover; contact analyst@example.invalid using Bearer synthetic-shift-token; public IP 8.8.8.8."
+        with patch("groq_service._generate", return_value=coaching) as provider:
             response = self.client.post(
                 f"/training/shifts/{shift['shift_id']}/handover",
-                json={"note": "Synthetic shift is complete; follow up on two items."},
+                json={"note": note},
                 headers=HEADERS,
             )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["coaching"], coaching)
-        self.assertEqual(provider.call_args.args[0], "Synthetic shift is complete; follow up on two items.")
+        self.assertEqual(response.get_json()["coaching"]["clarity_feedback"], "The status is clear.")
+        prompt = provider.call_args.args[0]
+        self.assertNotIn("analyst@example.invalid", prompt)
+        self.assertNotIn("synthetic-shift-token", prompt)
+        self.assertNotIn("8.8.8.8", prompt)
+        self.assertIn("[REDACTED_EMAIL]", prompt)
+        self.assertIn("[REDACTED_TOKEN]", prompt)
+        self.assertIn("[REDACTED_PUBLIC_IP]", prompt)
         stored = database.get_training_shift(shift["shift_id"])
-        self.assertIn("Synthetic shift is complete", stored["handover_note"])
+        self.assertIn("analyst@example.invalid", stored["handover_note"])
         self.assertIsNotNone(stored["handover_coaching_json"])
 
     def test_shift_timeout_scores_unanswered_cases_as_zero(self):

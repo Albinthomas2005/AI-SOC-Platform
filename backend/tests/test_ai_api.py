@@ -240,17 +240,18 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
         for excluded in (
             "full_log",
             "synthetic-full-log-value",
-            "dstuser",
-            "synthetic-user-value",
+            "dstip",
+            "192.168.1.7",
         ):
             self.assertNotIn(excluded, serialized_messages)
+        self.assertIn("dstuser", serialized_messages)
 
     def test_alert_with_no_allowlisted_fields_returns_422(self):
         with patch("app.explain_alert") as explain:
             response = self.post_alert(
                 {
                     "full_log": "synthetic raw log",
-                    "data": {"dstuser": "synthetic-user"},
+                    "hostname": "not-allowlisted",
                 }
             )
 
@@ -263,7 +264,7 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
 
     def test_private_addresses_are_pseudonymized_before_alert_analysis(self):
         alert = {
-            "data": {"srcip": "192.168.5.10", "dstip": "192.168.5.10"},
+            "data": {"srcip": "192.168.5.10"},
             "rule": {"description": "Connection from 192.168.5.10"},
         }
         with patch("app.explain_alert", return_value="Synthetic analysis") as explain:
@@ -273,7 +274,6 @@ class TestAnalyzeAlertAPI(unittest.TestCase):
         supplied_alert = explain.call_args.args[0]
         pseudonyms = (
             supplied_alert["data"]["srcip"],
-            supplied_alert["data"]["dstip"],
             supplied_alert["rule"]["description"].split()[-1],
         )
         self.assertEqual(len(set(pseudonyms)), 1)
@@ -436,6 +436,115 @@ class TestGenerateReportAPI(unittest.TestCase):
             response = self.post_report()
         self.assertEqual(response.status_code, 401)
 
+    def test_bad_token_failure_has_safe_reason_and_request_id(self):
+        response = self.post_report(headers={"Authorization": "Bearer wrong"})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["reason"], "bad_token")
+        self.assertTrue(response.headers.get("X-Request-ID"))
+        self.assertNotIn(b"wrong", response.data)
+
+    def test_provider_failure_reasons_are_specific_and_safe(self):
+        reasons = {
+            "missing_api_key": "AI provider API key is not configured",
+            "provider_unreachable": "AI provider is unreachable",
+            "timeout": "AI provider request timed out",
+            "rate_limited": "AI provider rate limit was reached",
+        }
+        for reason, message in reasons.items():
+            with self.subTest(reason=reason):
+                error = GroqUnavailable("private key prompt and provider details")
+                error.failure_reason = reason
+                with self.assertLogs("app", level="WARNING") as captured:
+                    with patch("app.generate_investigation_report", side_effect=error):
+                        response = self.post_report()
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.get_json()["reason"], reason)
+                self.assertEqual(response.get_json()["error"], message)
+                self.assertTrue(response.headers.get("X-Request-ID"))
+                self.assertIn(response.headers["X-Request-ID"], " ".join(captured.output))
+                self.assertIn(reason, " ".join(captured.output))
+                self.assertNotIn(b"private key", response.data)
+
+    def test_health_is_authenticated_and_reports_provider_state(self):
+        with patch("app.get_provider_health", return_value={
+            "provider_configured": True,
+            "provider_reachable": False,
+        }, create=True):
+            response = self.client.get("/api/ai/health", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {
+            "ok": True,
+            "provider_configured": True,
+            "provider_reachable": False,
+        })
+        unauthorized = self.client.get("/api/ai/health")
+        self.assertEqual(unauthorized.status_code, 401)
+
+    def test_every_report_route_rejects_unauthenticated_requests(self):
+        import re
+
+        routes = [rule for rule in app.url_map.iter_rules() if rule.rule.startswith("/api/ai/")]
+        self.assertTrue(routes)
+        for route in routes:
+            path = re.sub(r"<[^>]+>", "a" * 32, route.rule)
+            method = "GET" if "GET" in route.methods else "POST"
+            with self.subTest(method=method, path=path):
+                response = self.client.open(path, method=method, json={})
+                self.assertEqual(response.status_code, 401)
+
+    def test_generated_report_decisions_flow_to_sqlite(self):
+        import database
+
+        with patch("app.generate_investigation_report", return_value="Synthetic draft"):
+            for decision in ("approved", "edited", "rejected"):
+                generated = self.post_report().get_json()
+                payload = {"decision": decision, "note": f"Reviewed as {decision}."}
+                if decision == "edited":
+                    payload["edited_analysis"] = "Analyst-edited report"
+                saved = self.client.post(
+                    f"/api/ai/analysis/{generated['analysis_id']}/decision",
+                    json=payload,
+                    headers=self.headers,
+                )
+
+                self.assertEqual(saved.status_code, 200)
+                stored = database.get_ai_analysis(generated["analysis_id"])
+                self.assertEqual(stored["decision"], decision)
+                self.assertEqual(stored["decision_note"], f"Reviewed as {decision}.")
+                self.assertEqual(
+                    stored["edited_text"],
+                    "Analyst-edited report" if decision == "edited" else None,
+                )
+
+    def test_secrets_tokens_and_obvious_pii_are_removed_before_report_provider(self):
+        import json
+
+        payload = json.loads(json.dumps(self.payload))
+        payload["evidence"]["alert"]["rule"]["description"] = (
+            "Contact analyst@example.invalid; Bearer synthetic-bearer-token; "
+            "access_token=synthetic-access-token; password=synthetic-password; "
+            "public IP 8.8.8.8"
+        )
+        payload["analyst_notes"] = (
+            "Email analyst@example.invalid, token Bearer synthetic-note-token, "
+            "API_KEY=synthetic-api-key, IP 203.0.113.8"
+        )
+        with patch("app.generate_investigation_report", return_value="Synthetic draft") as provider:
+            response = self.post_report(payload)
+
+        self.assertEqual(response.status_code, 200)
+        provider_input = json.dumps(provider.call_args.args)
+        for value in (
+            "analyst@example.invalid", "synthetic-bearer-token",
+            "synthetic-access-token", "synthetic-password", "synthetic-note-token",
+            "synthetic-api-key", "8.8.8.8", "203.0.113.8",
+        ):
+            self.assertNotIn(value, provider_input)
+        self.assertIn("[REDACTED_EMAIL]", provider_input)
+        self.assertIn("[REDACTED_TOKEN]", provider_input)
+        self.assertIn("[REDACTED_SECRET]", provider_input)
+        self.assertIn("[REDACTED_PUBLIC_IP]", provider_input)
+
     def test_invalid_payloads_are_rejected(self):
         invalid = [
             {},
@@ -523,10 +632,7 @@ class TestGenerateReportAPI(unittest.TestCase):
                         "mitre": {"technique": ["T1110"]},
                         "description": "Synthetic login failure from [REDACTED_PUBLIC_IP]",
                     },
-                    "data": {
-                        "srcip": "[REDACTED_PUBLIC_IP]",
-                        "authentication_result": "failed",
-                    },
+                    "data": {"srcip": "[REDACTED_PUBLIC_IP]"},
                 },
             },
         )
@@ -550,7 +656,7 @@ class TestGenerateReportAPI(unittest.TestCase):
                 "id": "synthetic-alert-id",
                 "alert": {
                     "rule": {"description": "Observed 10.12.0.8 and fd12::8"},
-                    "data": {"srcip": "10.12.0.8", "dstip": "fd12::8"},
+                    "data": {"srcip": "10.12.0.8"},
                 },
             },
             "analyst_notes": "Repeated 10.12.0.8 and fd12::8",
@@ -563,11 +669,10 @@ class TestGenerateReportAPI(unittest.TestCase):
         alert = generate.call_args.args[0]
         notes = generate.call_args.args[1]
         ipv4 = alert["data"]["srcip"]
-        ipv6 = alert["data"]["dstip"]
+        ipv6 = alert["rule"]["description"].split(" and ")[-1]
         self.assertEqual(alert["rule"]["description"], f"Observed {ipv4} and {ipv6}")
         self.assertEqual(notes, f"Repeated {ipv4} and {ipv6}")
         self.assertNotIn("10.12.0.8", str((alert, notes)))
-        self.assertNotIn("fd12::8", str((alert, notes)))
         self.assertEqual(original_alert["data"]["srcip"], "10.12.0.8")
 
     def test_numeric_and_encoded_report_evidence_and_notes_are_sanitized(self):
@@ -577,7 +682,7 @@ class TestGenerateReportAPI(unittest.TestCase):
                 "id": "synthetic-alert-id",
                 "alert": {
                     "rule": {"description": "Observed IP 0xC0A80107"},
-                    "data": {"srcip": 3232235783, "dstip": "0xC0A80107"},
+                    "data": {"srcip": 3232235783},
                 },
             },
             "analyst_notes": (
@@ -591,7 +696,6 @@ class TestGenerateReportAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         safe_alert, safe_notes = generate.call_args.args
         address = safe_alert["data"]["srcip"]
-        self.assertEqual(safe_alert["data"]["dstip"], address)
         self.assertEqual(safe_alert["rule"]["description"], f"Observed IP {address}")
         self.assertEqual(safe_notes.count(address), 2)
         self.assertNotIn("3232235783", str((safe_alert, safe_notes)))
@@ -652,6 +756,106 @@ class TestGenerateReportAPI(unittest.TestCase):
             _generate("test prompt")
 
         self.assertEqual(create.call_args.kwargs["model"], "custom/model")
+
+    def test_provider_failures_are_classified_without_exposing_exception_text(self):
+        from types import SimpleNamespace
+        from groq_service import GroqUnavailable, _generate
+
+        class RateLimitError(Exception):
+            status_code = 429
+
+        class APITimeoutError(Exception):
+            pass
+
+        class APIConnectionError(Exception):
+            pass
+
+        failures = (
+            (RateLimitError("secret provider response"), "rate_limited"),
+            (APITimeoutError("secret prompt contents"), "timeout"),
+            (APIConnectionError("private endpoint"), "provider_unreachable"),
+        )
+        for failure, expected_reason in failures:
+            with self.subTest(reason=expected_reason):
+                create = Mock(side_effect=failure)
+                client = SimpleNamespace(
+                    chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+                )
+                with patch.dict(os.environ, {"GROQ_API_KEY": "synthetic-key"}), patch(
+                    "groq_service.Groq", return_value=client
+                ):
+                    with self.assertRaises(GroqUnavailable) as raised:
+                        _generate("synthetic prompt")
+                self.assertEqual(raised.exception.failure_reason, expected_reason)
+                self.assertNotIn("secret", str(raised.exception))
+
+    def test_missing_provider_key_has_a_specific_failure_reason(self):
+        from groq_service import GroqUnavailable, _generate
+
+        with patch.dict(os.environ, {"GROQ_API_KEY": ""}), patch(
+            "groq_service.Groq"
+        ) as provider:
+            with self.assertRaises(GroqUnavailable) as raised:
+                _generate("synthetic prompt")
+        self.assertEqual(raised.exception.failure_reason, "missing_api_key")
+        provider.assert_not_called()
+
+    def test_sudo_alert_full_log_is_excluded_from_analysis_prompt(self):
+        from groq_service import explain_alert
+
+        sudo_alert = {
+            "@timestamp": "2026-11-08T10:00:00Z",
+            "rule": {
+                "id": "5402",
+                "description": "sudo to root",
+                "level": 3,
+                "groups": ["sudo"],
+                "mitre": {"id": ["T1548.003"]},
+            },
+            "agent": {"name": "demo-agent", "id": "007"},
+            "data": {
+                "srcuser": "analyst",
+                "dstuser": "root",
+                "full_log": "SENSITIVE-SUDO-RAW-LOG",
+            },
+            "location": "/var/log/auth.log",
+            "hostname": "must-not-be-included",
+        }
+        with patch("groq_service._generate", return_value=VALID_ANALYSIS) as generate:
+            explain_alert(sudo_alert)
+        prompt = generate.call_args.args[0]
+        self.assertNotIn("SENSITIVE-SUDO-RAW-LOG", prompt)
+        self.assertNotIn("must-not-be-included", prompt)
+        self.assertIn('"id": "5402"', prompt)
+        self.assertNotIn("srcip", prompt)
+
+    def test_training_coaching_alert_is_reduced_to_shared_allowlist(self):
+        from groq_service import coach_training_report
+
+        scenario = {
+            "id": "demo-sudo",
+            "title": "Sudo to root",
+            "alert": {
+                "rule": {"id": "5402", "description": "sudo to root"},
+                "data": {
+                    "dstuser": "root",
+                    "full_log": "SENSITIVE-TRAINING-RAW-LOG",
+                },
+                "hostname": "must-not-be-included",
+            },
+            "evidence": {
+                "log_lines": ["SENSITIVE-TRAINING-RAW-LOG"],
+                "context_notes": ["private training note"],
+            },
+        }
+        response = '{"what_was_good":"good","what_was_missed":"missed","one_thing_to_practise":"practice"}'
+        with patch("groq_service._generate", return_value=response) as generate:
+            coach_training_report("Synthetic report", scenario, "Synthetic explanation")
+        prompt = generate.call_args.args[0]
+        self.assertNotIn("SENSITIVE-TRAINING-RAW-LOG", prompt)
+        self.assertNotIn("must-not-be-included", prompt)
+        self.assertNotIn("private training note", prompt)
+        self.assertIn('"id": "5402"', prompt)
 
     def test_reasoning_parameters_are_limited_to_gpt_oss_models(self):
         from types import SimpleNamespace
@@ -721,17 +925,9 @@ class TestGenerateReportAPI(unittest.TestCase):
         from types import SimpleNamespace
         from groq_service import _generate
 
-        cases = (
-            ("true", True),
-            ("1", False),
-            ("yes", False),
-            ("on", False),
-            ("TRUE", False),
-            ("True", False),
-            ("false", False),
-            ("", False),
-            (None, False),
-        )
+        # Internal hostnames and user identifiers must never leave the
+        # service, even when an operator has not enabled an optional setting.
+        cases = (("true", True), ("false", True), ("", True), (None, True))
         for configured_value, strict_enabled in cases:
             with self.subTest(value=configured_value):
                 completion = SimpleNamespace(
@@ -752,7 +948,8 @@ class TestGenerateReportAPI(unittest.TestCase):
                         os.environ["SOC_AI_STRICT_PRIVACY"] = configured_value
                     with patch("groq_service.Groq", return_value=client):
                         _generate(
-                            "Host ws-23.corp.example user=alice; IP 192.168.4.8",
+                            "Host ws-23.corp.example hostname=server01 "
+                            "agent.name='node7' user=alice; IP 192.168.4.8",
                             system_prompt=(
                                 "URL https://srv.internal.local/a; IP 192.168.4.8"
                             ),
@@ -764,6 +961,8 @@ class TestGenerateReportAPI(unittest.TestCase):
                     self.assertIn("[NONPUBLIC_IP_", message["content"])
                 if strict_enabled:
                     self.assertIn("[REDACTED_HOST]", messages[1]["content"])
+                    self.assertNotIn("server01", messages[1]["content"])
+                    self.assertNotIn("node7", messages[1]["content"])
                     self.assertIn("[REDACTED_USER]", messages[1]["content"])
                     self.assertIn("[REDACTED_URL]", messages[0]["content"])
                 else:
@@ -781,6 +980,7 @@ class TestGenerateReportAPI(unittest.TestCase):
             response = self.post_report()
 
         self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["reason"], "provider_unreachable")
         self.assertNotIn(b"private provider detail", response.data)
 
     def test_unexpected_errors_return_safe_responses(self):

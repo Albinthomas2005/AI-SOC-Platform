@@ -52,7 +52,7 @@ Ollama requests are sent to `/api/chat`; the model must support the chat
 endpoint. No provider credentials are required for this local option. This
 adapter is covered by mocked tests; a real Ollama model has not been run here.
 
-The Flask service exposes three token-protected application endpoints. `POST /api/ai/analyze-alert`
+The Flask service exposes token-protected application endpoints. `POST /api/ai/analyze-alert`
 accepts a Wazuh alert for trusted services that need an AI explanation. It requires a bearer token in the
 `SOC_AI_INTERNAL_TOKEN` environment variable, accepts a JSON object containing
 an `alert` object, sanitizes the alert before analysis, and returns JSON. The
@@ -127,8 +127,9 @@ python -m unittest discover -s tests -v
 GitHub Actions runs the same unit-test command on pushes and pull requests to `main`.
 
 With the backend running and `SOC_AI_INTERNAL_TOKEN` set in the ignored
-`backend/.env`, run `./scripts/smoke_test.sh` from this directory. An optional
-port argument overrides the default `5000`. The script checks that a request
+`backend/.env`, run `./scripts/smoke_test.sh` from this directory. It reads the
+port from `SOC_AI_PORT`, defaulting to `5000`; an optional positional port can
+override it. The script checks that a request
 without a token receives 401 and that the synthetic alert request returns
 `ok: true`; it prints only PASS/FAIL and status information, never the token or
 Groq key.
@@ -167,20 +168,12 @@ as `12:34:56` are preserved.
 
 These rules cannot reliably identify every encoding, obfuscation, or malformed
 address. Bare integer or hexadecimal values without IP context, encodings nested
-more than five times, and custom encodings may pass through. Default mode does
-not mask hostnames, URLs, MAC addresses, usernames, file paths, or command
-output as a whole. Their contents may identify a system even when literal IPs
-are filtered. The report API allowlists alert fields, but descriptions and
-analyst notes can still contain identifying context.
-
-An opt-in stricter filter can mask common identifiers at the final provider
-boundary: set `SOC_AI_STRICT_PRIVACY` to exactly the lowercase string `true`
-in the backend environment. Other values, including `TRUE`, do not enable it. It masks
-common HTTP, FTP, SSH, WebSocket, and file URLs; fully qualified hostnames;
-colon-, hyphen-, and Cisco-style MAC addresses; explicitly labeled usernames or
-accounts; and absolute Unix or Windows path tokens without embedded whitespace.
-It can remove useful SOC evidence and does not classify or redact arbitrary
-command output or every identifier. The default remains off.
+more than five times, and custom encodings may pass through. The provider
+boundary also masks common URLs, fully qualified hostnames, MAC addresses,
+explicitly labeled usernames or accounts, and absolute Unix or Windows path
+tokens. Pattern filtering cannot guarantee that arbitrary command output or
+every identifier is removed. The report API allowlists alert fields, but
+descriptions and analyst notes can still contain identifying context.
 
 The Generate Report API sends only allowlisted alert fields and sanitized notes.
 Both API endpoints pass their provider-bound prompts through the
@@ -190,6 +183,95 @@ reduces IP disclosure but does not provide complete anonymization. Pseudonyms
 preserve within-analysis correlation, and surrounding context may still
 identify a host or person. Review sanitized output and avoid unnecessary
 sensitive details.
+
+## Deterministic correlation API
+
+`POST /api/correlations` requires the internal bearer token and accepts an
+`alerts` array. It groups alert pairs that share a host, user, or source IP
+within `SOC_AI_CORRELATION_WINDOW_MINUTES` (default 15; valid range 1-1440),
+then returns group timelines with timestamps, evidence alert IDs, rule IDs,
+and shared entities. Connected pairwise links form one group for a sequence
+such as SSH failures, success, and sudo. The provider receives only the
+grouped timeline and summarizes it; entity values are redacted before the
+provider call. If no groups are found, the endpoint returns a deterministic
+message without calling a provider.
+
+## Incident API
+
+Every `/api/incidents` route requires the same internal bearer token. Create
+an incident with `POST /api/incidents` using either an `alerts` array or a
+`correlation_group` with a timeline. `GET /api/incidents` lists incidents;
+`GET /api/incidents/<id>` returns evidence, analyst notes, decision log, and
+timeline. The `/status`, `/assignment`, `/notes`, and `/decisions` POST routes
+record validated workflow changes. `GET /api/incidents/<id>/report` returns a
+Markdown report. Allowed statuses are New, Investigating, Escalated, Contained,
+Resolved, and Closed; transitions are validated and Closed is terminal.
+
+## Threat-intel API
+
+`POST /api/threat-intel/lookup` accepts an alert object or incident ID and
+requires the internal bearer token. It extracts public IPs, public domains,
+URLs, and hashes. Private/non-global IPs, internal hostnames, URL credentials,
+queries, and fragments are excluded. VirusTotal and AbuseIPDB adapters read
+`VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` from the process environment;
+these keys must not be sent by a request or stored in source. Results are
+cached in SQLite, and each provider has a configurable per-minute request
+limit. Only returned provider data is included in the AI summary prompt; when
+there is no returned data, the API says so without calling the AI provider.
+HTTP behavior is covered with mocks; no live provider request has been run.
+
+## Read-only hunting
+
+`POST /api/hunts/proposals` validates AI-proposed JSON against the local
+ATT&CK catalog, the `wazuh-alerts-4.x-*` index allowlist, an allowlist of
+query fields and clauses, and a maximum size of 1,000. Scripts and write
+operations are rejected. The Dashboard plugin's `POST /api/hunts/run`
+controller retrieves the signed-in Wazuh user, asks the backend for a
+proposal, validates the query envelope again, and runs it through
+`asCurrentUser.search`; the user's OpenSearch permissions therefore apply.
+It submits minimized results to `/api/hunts/<id>/results` for interpretation
+and storage. Hunt reports are scoped to their creating username. Provider
+prompts are privacy-filtered by the existing backend provider boundary.
+
+## Roles and audit
+
+Every `/api/` and `/training/` route is gated by both the internal bearer token
+and the role associated with `X-SOC-User` (missing identity falls back to the
+least-privileged `local-analyst`). L1 can use analysis/report/training routes;
+L2 adds correlation, incidents, and threat intel; L3 adds hunting; admin can
+manage users and view audit records. Set comma-separated bootstrap accounts
+with `SOC_AI_ADMIN_USERS` in the protected backend environment. Admins can
+assign L1, L2, L3, or admin through `PUT /api/admin/users/<username>/role`.
+
+`GET /api/admin/audit` is admin-only. Audit events record the user, action,
+object, time, and compact details for analyst decisions, incident status
+changes, imports, training progress exports, and role changes. SQLite triggers
+reject updates and deletes to the audit table. Route-role and audit behavior
+is covered with temporary-database tests.
+
+`POST /api/admin/retention/purge` is admin-only and defaults to `{}` (dry run).
+`{"dry_run": false}` performs deletion. Alert rows, raw/imported alert data,
+AI/hunting reports, and training attempt reports use configurable
+`SOC_AI_ALERT_RETENTION_DAYS` (90 by default) and
+`SOC_AI_REPORT_RETENTION_DAYS` (180 by default). The service enforces
+`SOC_AI_MAX_REQUEST_BYTES` (1 MiB default, maximum 10 MiB) and
+`SOC_AI_RATE_LIMIT_PER_MINUTE` (120 per route and client by default).
+
+The optional synthetic local load check is `python scripts/load-test.py` from
+the repository root. Set `SOC_AI_INTERNAL_TOKEN`; it only requests the
+authenticated training scenario list. The load script is documented and has
+not been run.
+
+## Evidence assistant
+
+`POST /api/assistant/chat` accepts a question and up to ten `{type, id}`
+references for alert, report, incident, or hunt records. It loads only stored
+objects available to the authenticated user's role (L1 reports/alerts, L2
+incidents, L3 hunts; hunts are owner-scoped) and sends that evidence through
+the standard privacy-filtered provider boundary. Answers must cite source
+IDs as `[type:id]`. If no referenced object is accessible, it returns a
+deterministic refusal without a provider call. Coverage uses mocked providers
+and temporary databases.
 
 ## Security notes
 
@@ -201,7 +283,7 @@ sensitive details.
 
 ## Project status
 
-The repository includes the synthetic-alert integration, OpenSearch role examples, importer, and 23 privacy-filter tests. The full backend test suite currently contains 53 tests. Automated processing of selected real alerts is not yet considered production-ready.
+The repository includes synthetic integrations, OpenSearch role examples, an importer, training workflows, and backend tests. The current suite count is reported in the root README. Automated processing of selected real alerts is not yet considered production-ready.
 
 ## Author
 

@@ -1,14 +1,19 @@
 
 import json
+import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "soc_alerts.db"
+DB_PATH = Path(
+    os.environ.get("SOC_AI_DB_PATH", Path(__file__).parent / "soc_alerts.db")
+).expanduser()
 
 
 def get_connection():
-    connection = sqlite3.connect(DB_PATH)
+    configured_path = os.environ.get("SOC_AI_DB_PATH", "").strip()
+    database_path = Path(configured_path).expanduser() if configured_path else DB_PATH
+    connection = sqlite3.connect(database_path)
     connection.row_factory = sqlite3.Row
     return connection
 
@@ -32,6 +37,12 @@ def init_db():
         connection.execute("""
             CREATE TABLE IF NOT EXISTS wazuh_imports (
                 wazuh_id TEXT PRIMARY KEY
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS lab_uploads (
+                upload_id TEXT PRIMARY KEY, username TEXT NOT NULL, title TEXT NOT NULL,
+                platform TEXT NOT NULL, line_count INTEGER NOT NULL, uploaded_at TEXT NOT NULL
             )
         """)
 
@@ -143,6 +154,134 @@ def init_db():
             )
         """)
 
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incidents (
+                incident_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL CHECK (status IN (
+                    'New', 'Investigating', 'Escalated', 'Contained',
+                    'Resolved', 'Closed'
+                )),
+                assigned_analyst TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incident_evidence (
+                evidence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                incident_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                evidence_json TEXT NOT NULL,
+                FOREIGN KEY (incident_id) REFERENCES incidents(incident_id)
+                    ON DELETE CASCADE
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incident_notes (
+                note_id TEXT PRIMARY KEY,
+                incident_id TEXT NOT NULL,
+                author TEXT NOT NULL,
+                note TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (incident_id) REFERENCES incidents(incident_id)
+                    ON DELETE CASCADE
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incident_decisions (
+                decision_id TEXT PRIMARY KEY,
+                incident_id TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                rationale TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (incident_id) REFERENCES incidents(incident_id)
+                    ON DELETE CASCADE
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incident_events (
+                event_id TEXT PRIMARY KEY,
+                incident_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                detail_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (incident_id) REFERENCES incidents(incident_id)
+                    ON DELETE CASCADE
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS threat_intel_cache (
+                provider TEXT NOT NULL,
+                ioc_type TEXT NOT NULL,
+                ioc_value TEXT NOT NULL,
+                cached_at INTEGER NOT NULL,
+                response_json TEXT NOT NULL,
+                PRIMARY KEY (provider, ioc_type, ioc_value)
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS threat_intel_rate_limit (
+                provider TEXT NOT NULL,
+                window_start INTEGER NOT NULL,
+                request_count INTEGER NOT NULL,
+                PRIMARY KEY (provider, window_start)
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS hunting_reports (
+                hunt_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                question TEXT NOT NULL,
+                hypothesis TEXT NOT NULL,
+                query_json TEXT NOT NULL,
+                mitre_json TEXT NOT NULL,
+                results_json TEXT,
+                interpretation TEXT,
+                created_at TEXT NOT NULL,
+                completed_at TEXT
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS soc_users (
+                username TEXT PRIMARY KEY,
+                role TEXT NOT NULL CHECK (role IN ('L1', 'L2', 'L3', 'admin')),
+                updated_at TEXT NOT NULL
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                action TEXT NOT NULL,
+                object_type TEXT NOT NULL,
+                object_id TEXT NOT NULL,
+                occurred_at TEXT NOT NULL,
+                details_json TEXT NOT NULL DEFAULT '{}'
+            )
+        """)
+        connection.execute("""
+            CREATE TRIGGER IF NOT EXISTS audit_log_no_update
+            BEFORE UPDATE ON audit_log
+            BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END
+        """)
+        connection.execute("""
+            CREATE TRIGGER IF NOT EXISTS audit_log_no_delete
+            BEFORE DELETE ON audit_log
+            BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END
+        """)
+        for username in os.environ.get("SOC_AI_ADMIN_USERS", "").split(","):
+            username = username.strip()
+            if username:
+                connection.execute(
+                    """INSERT OR IGNORE INTO soc_users (username, role, updated_at)
+                       VALUES (?, 'admin', datetime('now'))""",
+                    (username,),
+                )
+
 
 def add_alert(timestamp, severity, rule, source_ip, status="New"):
     with closing(get_connection()) as connection, connection:
@@ -211,6 +350,55 @@ def get_ai_analysis(analysis_id):
         return connection.execute(
             "SELECT * FROM ai_analyses WHERE analysis_id = ?", (analysis_id,)
         ).fetchone()
+
+
+def get_soc_user_role(username):
+    with closing(get_connection()) as connection, connection:
+        row = connection.execute(
+            "SELECT role FROM soc_users WHERE username = ?", (username,)
+        ).fetchone()
+    return row["role"] if row else "L1"
+
+
+def set_soc_user_role(username, role, updated_at):
+    with closing(get_connection()) as connection, connection:
+        connection.execute(
+            """INSERT INTO soc_users (username, role, updated_at) VALUES (?, ?, ?)
+               ON CONFLICT(username) DO UPDATE SET
+                 role = excluded.role, updated_at = excluded.updated_at""",
+            (username, role, updated_at),
+        )
+
+
+def append_audit_event(
+    connection, username, action, object_type, object_id, occurred_at, details=None
+):
+    connection.execute(
+        """INSERT INTO audit_log
+           (username, action, object_type, object_id, occurred_at, details_json)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            username, action, object_type, str(object_id), occurred_at,
+            json.dumps(details or {}, ensure_ascii=False),
+        ),
+    )
+
+
+def record_audit_event(username, action, object_type, object_id, occurred_at, details=None):
+    with closing(get_connection()) as connection, connection:
+        append_audit_event(
+            connection, username, action, object_type, object_id, occurred_at, details
+        )
+
+
+def get_audit_events(limit=100, offset=0):
+    with closing(get_connection()) as connection, connection:
+        return connection.execute(
+            """SELECT audit_id, username, action, object_type, object_id,
+                      occurred_at, details_json
+               FROM audit_log ORDER BY audit_id DESC LIMIT ? OFFSET ?""",
+            (limit, offset),
+        ).fetchall()
 
 
 def save_training_attempt(attempt):

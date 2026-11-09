@@ -1,10 +1,13 @@
 import '@testing-library/jest-dom';
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter, Switch } from 'react-router-dom';
 import NavigationService from '../../react-services/navigation-service';
 import { WzRequest } from '../../react-services/wz-request';
 import { AiSocDashboard } from './index';
+import { aiSocDashboardRoute } from './route';
 import { useAiSocOverview } from './use-ai-soc-overview';
+import { Applications } from '../../utils/applications';
 
 jest.mock('../../react-services/navigation-service', () => ({
   __esModule: true,
@@ -35,6 +38,7 @@ const data = {
 describe('AiSocDashboard', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (WzRequest.genericReq as jest.Mock).mockResolvedValue({ data: { uploads_exist: false } });
     (useAiSocOverview as jest.Mock).mockReturnValue({
       status: 'available',
       data,
@@ -44,6 +48,14 @@ describe('AiSocDashboard', () => {
     render(<AiSocDashboard />);
     expect(screen.getByText('Synthetic alert')).toBeInTheDocument();
     expect(screen.getByText('host-1')).toBeInTheDocument();
+  });
+  it('mounts the dashboard through its production Route component binding', () => {
+    render(
+      <MemoryRouter initialEntries={['/ai-soc-dashboard']}>
+        <Switch>{aiSocDashboardRoute}</Switch>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('heading', { name: 'AI SOC Dashboard' })).toBeInTheDocument();
   });
   it('navigates into the existing Threat Hunting events view', () => {
     const navigateToApp = jest.fn();
@@ -56,6 +68,21 @@ describe('AiSocDashboard', () => {
       path: '#overview/?tab=general&tabView=events',
     });
   });
+  it('opens the registered SOC Workbench from the dashboard', () => {
+    const navigateToApp = jest.fn();
+    (NavigationService.getInstance as jest.Mock).mockReturnValue({ navigateToApp });
+    render(<AiSocDashboard />);
+    fireEvent.click(screen.getByRole('button', { name: 'Workbench' }));
+    expect(navigateToApp).toHaveBeenCalledWith('security-operations-workbench');
+  });
+  it('renders the Lab only toggle and enables filtering when selected', () => {
+    render(<AiSocDashboard />);
+    fireEvent.click(screen.getByRole('switch', { name: 'Lab only' }));
+    expect(useAiSocOverview).toHaveBeenLastCalledWith(true);
+  });
+  it('keeps the SOC Workbench registered in the left navigation application list', () => {
+    expect(Applications.some(application => application.id === 'security-operations-workbench')).toBe(true);
+  });
   it('requests a report by alert reference and marks the response unverified', async () => {
     (WzRequest.genericReq as jest.Mock).mockResolvedValue({
       data: {
@@ -64,15 +91,18 @@ describe('AiSocDashboard', () => {
         status: 'ai_generated_unverified',
         decision: 'unreviewed',
         decision_label: 'AI draft - not reviewed',
-        report: '## Assessment\n\nSynthetic report draft',
+        report: '## Assessment\n\nSynthetic report draft\n<img src=x onerror=alert(1)>',
       },
     });
-    render(<AiSocDashboard />);
+    const { container } = render(<AiSocDashboard />);
     fireEvent.click(screen.getByRole('button', { name: 'Generate report' }));
     expect(
-      await screen.findByRole('heading', { level: 2, name: 'Assessment' }),
+      await screen.findByText((_, element) =>
+        element?.tagName === 'PRE' &&
+        element.textContent === '## Assessment\n\nSynthetic report draft\n<img src=x onerror=alert(1)>',
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByText('Synthetic report draft')).toBeInTheDocument();
+    expect(container.querySelector('img')).toBeNull();
     expect(
       screen.getByText('AI draft - not reviewed'),
     ).toBeInTheDocument();

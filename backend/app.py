@@ -1,24 +1,50 @@
 
 import hmac
 import json
+import logging
 import os
 import re
+import threading
+import time
 import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
 from flask import (
     Flask,
+    g,
     jsonify,
     request,
 )
 
-from database import init_db, save_ai_analysis, set_ai_analysis_decision
+from database import (
+    get_connection,
+    init_db,
+    record_audit_event,
+    save_ai_analysis,
+    set_ai_analysis_decision,
+)
 from training import register_training_routes
+from correlation import correlate_alerts
+from incidents import register_incident_routes
+from threat_intel import (
+    RateLimitExceeded,
+    extract_iocs,
+    lookup_iocs,
+    summarize_threat_intel,
+)
+from hunting import register_hunting_routes
+from roles_audit import enforce_route_access, register_admin_routes
+from retention import register_retention_routes
+from assistant import register_assistant_routes
+from lab_uploads import register_lab_routes
 from groq_service import (
     explain_alert,
     generate_investigation_report,
+    summarize_correlation,
+    get_provider_health,
     GroqUnavailable,
     InvalidAIResponse,
 )
@@ -30,9 +56,59 @@ from privacy_filter import (
 )
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
+logger = logging.getLogger(__name__)
+
+SAFE_FAILURES = {
+    "missing_api_key": "AI provider API key is not configured",
+    "provider_unreachable": "AI provider is unreachable",
+    "timeout": "AI provider request timed out",
+    "rate_limited": "AI provider rate limit was reached",
+    "bad_token": "Backend authentication failed",
+    "provider_error": "AI report generation failed",
+}
+
+
+@app.before_request
+def assign_request_id():
+    g.request_id = uuid.uuid4().hex
+    if request.method == "POST" and (
+        request.path == "/api/lab/uploads" or request.path.startswith("/api/lab/samples/")
+    ):
+        g.lab_upload_id = uuid.uuid4().hex
+
+
+@app.after_request
+def add_request_id(response):
+    response.headers["X-Request-ID"] = getattr(g, "request_id", uuid.uuid4().hex)
+    upload_id = getattr(g, "lab_upload_id", None)
+    if upload_id:
+        payload = response.get_json(silent=True) or {}
+        reason = payload.get("error") or ("accepted" if response.status_code < 400 else "request_rejected")
+        logger.warning(
+            "Lab upload attempt status=%s reason=%s upload_id=%s",
+            response.status_code,
+            reason,
+            upload_id,
+        )
+    return response
+
+
+def configured_max_request_bytes(value=None):
+    raw_value = os.environ.get("SOC_AI_MAX_REQUEST_BYTES", str(1 * 1024 * 1024)) if value is None else value
+    try:
+        limit = int(raw_value)
+    except (TypeError, ValueError):
+        raise RuntimeError("SOC_AI_MAX_REQUEST_BYTES must be an integer") from None
+    if not 1024 <= limit <= 10 * 1024 * 1024:
+        raise RuntimeError("SOC_AI_MAX_REQUEST_BYTES must be between 1024 and 10485760")
+    return limit
+
+
+app.config["MAX_CONTENT_LENGTH"] = configured_max_request_bytes()
 MAX_REPORT_REQUEST_BYTES = 256 * 1024
 MAX_ANALYST_NOTES_CHARS = 4000
+RATE_LIMIT_BUCKETS = {}
+RATE_LIMIT_LOCK = threading.Lock()
 
 
 @app.errorhandler(413)
@@ -40,6 +116,7 @@ def handle_request_too_large(error):
     if request.path in (
         "/api/ai/analyze-alert",
         "/api/ai/generate-report",
+        "/api/lab/uploads",
     ):
         message = (
             "Report request is too large"
@@ -54,6 +131,43 @@ def handle_request_too_large(error):
 @app.before_request
 def initialize_database_for_request():
     init_db()
+
+
+@app.before_request
+def enforce_request_rate_limit():
+    if not request.path.startswith(("/api/", "/training/")):
+        return None
+    try:
+        limit = int(os.environ.get("SOC_AI_RATE_LIMIT_PER_MINUTE", "120"))
+    except ValueError:
+        limit = 120
+    limit = max(1, min(limit, 10000))
+    now = time.monotonic()
+    username = request.headers.get("X-SOC-User", "local-analyst")
+    key = (request.remote_addr or "unknown", username, request.endpoint or request.path)
+    with RATE_LIMIT_LOCK:
+        window = RATE_LIMIT_BUCKETS.get(key)
+        if window is None or now - window[0] >= 60:
+            RATE_LIMIT_BUCKETS[key] = [now, 1]
+            return None
+        if window[1] >= limit:
+            return jsonify(ok=False, error="Request rate limit exceeded"), 429
+        window[1] += 1
+    return None
+
+
+@app.before_request
+def authorize_api_route():
+    result = enforce_route_access(has_valid_internal_token)
+    if (
+        result is not None
+        and request.path in ("/api/ai/generate-report", "/api/ai/health")
+        and result[1] == 401
+    ):
+        reason = "bad_token"
+        logger.warning("AI request failed request_id=%s reason=%s", g.request_id, reason)
+        return jsonify(ok=False, error=SAFE_FAILURES[reason], reason=reason), 401
+    return result
 
 
 def has_valid_internal_token():
@@ -73,6 +187,89 @@ def has_valid_internal_token():
 
 
 register_training_routes(app, has_valid_internal_token)
+register_incident_routes(app, has_valid_internal_token)
+register_hunting_routes(app, has_valid_internal_token)
+register_admin_routes(app, has_valid_internal_token)
+register_retention_routes(app, has_valid_internal_token)
+register_assistant_routes(app, has_valid_internal_token)
+register_lab_routes(app)
+
+
+@app.route("/api/threat-intel/lookup", methods=["POST"])
+def threat_intel_lookup_api():
+    if not has_valid_internal_token():
+        return jsonify(ok=False, error="Authentication required"), 401
+    if not request.is_json:
+        return jsonify(ok=False, error="A JSON threat-intel request is required"), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) not in ({"alert"}, {"incident_id"}):
+        return jsonify(ok=False, error="Provide one alert or incident_id"), 400
+
+    if "alert" in payload:
+        if not isinstance(payload["alert"], dict):
+            return jsonify(ok=False, error="alert must be an object"), 400
+        source = payload["alert"]
+    else:
+        incident_id = payload["incident_id"]
+        if not isinstance(incident_id, str) or not re.fullmatch(r"[0-9a-f]{32}", incident_id):
+            return jsonify(ok=False, error="Invalid incident ID"), 400
+        with closing(get_connection()) as connection, connection:
+            rows = connection.execute(
+                """SELECT evidence_json FROM incident_evidence
+                   WHERE incident_id = ? ORDER BY ordinal""", (incident_id,)
+            ).fetchall()
+        if not rows:
+            return jsonify(ok=False, error="Incident was not found or has no evidence"), 404
+        source = [json.loads(row["evidence_json"]) for row in rows]
+
+    iocs = extract_iocs(source)[:100]
+    try:
+        results = lookup_iocs(iocs) if iocs else []
+    except RateLimitExceeded:
+        return jsonify(ok=False, error="Threat-intel provider rate limit exceeded"), 429
+    summary = summarize_threat_intel(results)
+    return jsonify(
+        ok=True,
+        iocs=iocs,
+        results=results,
+        summary=summary,
+    )
+
+
+@app.route("/api/correlations", methods=["POST"])
+def correlate_alerts_api():
+    if not has_valid_internal_token():
+        return jsonify(ok=False, error="Authentication required"), 401
+
+    if not request.is_json:
+        return jsonify(ok=False, error="A JSON alert list is required"), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {"alerts"}:
+        return jsonify(ok=False, error="Invalid correlation request"), 400
+
+    try:
+        result = correlate_alerts(payload["alerts"])
+    except ValueError as error:
+        return jsonify(ok=False, error=str(error)), 400
+
+    summary = "No correlated alert groups were found."
+    if result["groups"]:
+        try:
+            summary = summarize_correlation(result)
+        except GroqUnavailable:
+            return jsonify(
+                ok=False,
+                error="Correlation summary is temporarily unavailable",
+                correlation=result,
+            ), 503
+        except Exception:
+            return jsonify(
+                ok=False,
+                error="Correlation summary could not be completed",
+                correlation=result,
+            ), 500
+
+    return jsonify(ok=True, correlation=result, summary=summary)
 
 
 @app.route("/api/ai/analyze-alert", methods=["POST"])
@@ -216,16 +413,20 @@ def generate_report_api():
             json.dumps(safe_alert, ensure_ascii=False),
             report,
         )
-    except GroqUnavailable:
-        return jsonify(
-            ok=False,
-            error="AI report generation is temporarily unavailable",
-        ), 503
+        record_audit_event(
+            request.headers.get("X-SOC-User", "local-analyst"),
+            "report_generated", "ai_analysis", analysis_id, created_at,
+        )
+    except GroqUnavailable as error:
+        reason = getattr(error, "failure_reason", "provider_error")
+        if reason not in SAFE_FAILURES:
+            reason = "provider_error"
+        logger.warning("AI report failed request_id=%s reason=%s", g.request_id, reason)
+        return jsonify(ok=False, error=SAFE_FAILURES[reason], reason=reason), 503
     except Exception:
-        return jsonify(
-            ok=False,
-            error="AI report generation could not be completed",
-        ), 500
+        reason = "provider_error"
+        logger.error("AI report failed request_id=%s reason=%s", g.request_id, reason)
+        return jsonify(ok=False, error=SAFE_FAILURES[reason], reason=reason), 500
 
     return jsonify(
         ok=True,
@@ -237,6 +438,12 @@ def generate_report_api():
         decision_label="AI draft - not reviewed",
         decided_at=None,
     )
+
+
+@app.route("/api/ai/health", methods=["GET"])
+def ai_health_api():
+    provider_state = get_provider_health()
+    return jsonify(ok=True, **provider_state)
 
 
 @app.route("/api/ai/analysis/<analysis_id>/decision", methods=["POST"])
@@ -283,6 +490,11 @@ def record_analysis_decision(analysis_id):
         return jsonify(ok=False, error="Analyst decision could not be saved"), 500
     if not updated:
         return jsonify(ok=False, error="Analysis was not found"), 404
+    record_audit_event(
+        request.headers.get("X-SOC-User", "local-analyst"),
+        "decision", "ai_analysis", analysis_id, decided_at,
+        {"decision": decision},
+    )
 
     return jsonify(
         ok=True,

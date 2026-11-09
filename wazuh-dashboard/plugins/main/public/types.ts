@@ -1,6 +1,7 @@
 import { AppMountParameters, CoreStart } from 'opensearch_dashboards/public';
 import { ChartsPluginStart } from '../../../src/plugins/charts/public/plugin';
 import { DiscoverStart } from '../../../src/plugins/discover/public';
+import { DiscoverSetup } from '../../../src/plugins/discover/public';
 import {
   VisualizationsSetup,
   VisualizationsStart,
@@ -25,7 +26,7 @@ export interface AppPluginStartDependencies {
   navigation: NavigationPublicPluginStart;
   data: DataPublicPluginStart;
   visualizations: VisualizationsStart;
-  discover: DiscoverStart;
+  discover?: DiscoverStart;
   charts: ChartsPluginStart;
   securityOss: SecurityOssPluginStart;
   savedObjects: SavedObjectsStart;
@@ -46,6 +47,7 @@ export type WazuhSetupPlugins = {
   data: DataPublicPluginSetup;
   navigation: NavigationPublicPluginStart;
   telemetry: TelemetryPluginSetup;
+  discover?: DiscoverSetup;
 };
 
 export type WazuhStartPlugins = AppPluginStartDependencies;

@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
-import { AiSocDashboard } from './components/ai-soc-dashboard';
+import { aiSocDashboardRoute } from './components/ai-soc-dashboard/route';
 import { TrainingPageApp } from './components/training/training-page-boundary';
+import { PhaseWorkbench } from './components/phase-workbench';
+import { LabUploads } from './components/lab-uploads';
 import { Router, Route, Switch, Redirect } from 'react-router-dom';
 import { ToolsRouter } from './components/tools/tools-router';
 import { getWazuhCorePlugin, getWzMainParams } from './kibana-services';
@@ -72,42 +74,40 @@ export function Application(props) {
         <Route
           path={`/${SECTIONS.HEALTH_CHECK}`}
           exact
-          render={HealthCheck}
+          component={HealthCheck}
         ></Route>
         <Route
           path={`/${SECTIONS.AGENTS_PREVIEW}/deploy`}
           exact
-          render={RegisterAgent}
+          component={RegisterAgent}
         ></Route>
-        <Route path={`/${SECTIONS.AGENTS}`} exact render={AgentView}></Route>
+        <Route path={`/${SECTIONS.AGENTS}`} exact component={AgentView}></Route>
         <Route
           path={`/${SECTIONS.AGENTS_PREVIEW}/`}
           exact
-          render={MainEndpointsSummary}
+          component={MainEndpointsSummary}
         ></Route>
         <Route
           path={`/${SECTIONS.MANAGER}`}
           exact
-          render={WzManagement}
+          component={WzManagement}
         ></Route>
-        <Route
-          path={`/${SECTIONS.OVERVIEW}`}
-          exact
-          render={props => <Overview {...props} />}
-        ></Route>
-        <Route path='/ai-soc-dashboard' exact render={AiSocDashboard}></Route>
+        <Route path={`/${SECTIONS.OVERVIEW}`} exact component={Overview}></Route>
+        {aiSocDashboardRoute}
         <Route path='/training' exact component={TrainingPageApp}></Route>
-        <Route path={`/${SECTIONS.SETTINGS}`} exact render={Settings}></Route>
-        <Route path={`/${SECTIONS.SECURITY}`} exact render={WzSecurity}></Route>
+        <Route path='/phase-workbench' exact component={PhaseWorkbench}></Route>
+        <Route path='/lab-uploads' exact component={LabUploads}></Route>
+        <Route path={`/${SECTIONS.SETTINGS}`} exact component={Settings}></Route>
+        <Route path={`/${SECTIONS.SECURITY}`} exact component={WzSecurity}></Route>
         <Route
           path={`/${SECTIONS.WAZUH_DEV}`}
           exact
-          render={props => <ToolsRouter {...props} />}
+          component={ToolsRouter}
         ></Route>
         <Route
           path={`/${SECTIONS.BLANK_SCREEN}`}
           exact
-          render={props => <WzBlankScreen {...props} />}
+          component={WzBlankScreen}
         ></Route>
         <Redirect from='/' to={getWzMainParams()} />
       </Switch>

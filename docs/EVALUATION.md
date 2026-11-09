@@ -1,10 +1,11 @@
 # Synthetic evaluation
 
-The latest saved run is summarized in [`documentation/evaluation.md`](../documentation/evaluation.md)
-(14 scenarios, 8/14 passed; recorded 2026-11-07 07:06 UTC). The report stores
-per-check outcomes and timings, but no raw model responses. The exact missing
-keywords or forbidden phrases therefore cannot be recovered for failures that
-only record a failed check.
+The historical run is summarized in [`documentation/evaluation.md`](../documentation/evaluation.md)
+(14 scenarios, 8/14 passed; recorded 2026-11-07 07:06 UTC). New CLI runs write
+to [`EVALUATION_RESULTS.md`](EVALUATION_RESULTS.md). No live evaluation was run
+for Phase 1 stabilization. The historical report stores per-check outcomes
+and timings, but no raw model responses; exact missing keywords or prohibited
+phrases cannot be recovered for its failed checks.
 
 ## Failed scenarios in the saved run
 

@@ -10,7 +10,8 @@ EMAIL_RE = re.compile(
     r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
 )
 IPV4_RE = re.compile(
-    r"(?<![A-Za-z0-9_.])(?:\d{1,3}\.){3}\d{1,3}(?![A-Za-z0-9_.])"
+    r"(?<![A-Za-z0-9_.])(?:\d{1,3}\.){3}\d{1,3}"
+    r"(?=$|[\s,;:!?)}\]]|\.(?=\s|$))"
 )
 IPV6_RE = re.compile(
     r"(?i)(?<![A-Za-z0-9])"
@@ -79,6 +80,10 @@ HOSTNAME_RE = re.compile(
     r"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
     r"(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59})\b"
 )
+LABELED_HOST_RE = re.compile(
+    r"(?i)(?P<label>\b(?:host|hostname|agent\.name)\b\s*[:=]\s*[\"']?)"
+    r"(?P<value>[a-z0-9][a-z0-9._-]*)"
+)
 USERNAME_RE = re.compile(
     r"(?i)\b(user(?:name)?|account|login)(\s*[:=]\s*)[^\s,;]+"
 )
@@ -87,26 +92,19 @@ UNIX_PATH_RE = re.compile(
 )
 WINDOWS_PATH_RE = re.compile(r"(?i)\b[A-Z]:\\(?:[^\\\s]+\\)*[^\\\s]+")
 
-REPORT_EVIDENCE_FIELDS = (
+AI_ALERT_FIELD_ALLOWLIST = (
     "@timestamp",
     "timestamp",
     "rule.id",
-    "rule.level",
     "rule.description",
+    "rule.level",
     "rule.groups",
-    "rule.mitre.id",
-    "rule.mitre.tactic",
-    "rule.mitre.technique",
-    "decoder.name",
-    "agent.id",
+    "rule.mitre.*",
+    "agent.name",
     "data.srcip",
-    "data.dstip",
-    "data.srcport",
-    "data.dstport",
-    "data.protocol",
-    "data.action",
-    "data.authentication_result",
-    "data.win.system.eventID",
+    "data.srcuser",
+    "data.dstuser",
+    "location",
 )
 
 
@@ -130,11 +128,7 @@ def _mask_address(address, privacy_context, original=None):
         if packed[:12] == (b"\x00" * 10 + b"\xff\xff"):
             mapped_address = ipaddress.IPv4Address(packed[12:])
     canonical_address = mapped_address or address
-    if (
-        canonical_address.is_private
-        or canonical_address.is_loopback
-        or canonical_address.is_link_local
-    ):
+    if not canonical_address.is_global:
         normalized = canonical_address.compressed.lower()
         addresses = privacy_context["addresses"]
         if normalized not in addresses:
@@ -145,8 +139,6 @@ def _mask_address(address, privacy_context, original=None):
             ).hexdigest()[:16]
             addresses[normalized] = f"[NONPUBLIC_IP_{digest}]"
         return addresses[normalized]
-    if not canonical_address.is_global:
-        return address.compressed if original is None else original
     return "[REDACTED_PUBLIC_IP]"
 
 
@@ -259,6 +251,9 @@ def _strict_sanitize_text(value):
     value = URL_RE.sub("[REDACTED_URL]", value)
     value = MAC_RE.sub("[REDACTED_MAC]", value)
     value = USERNAME_RE.sub(lambda m: m.group(1) + m.group(2) + "[REDACTED_USER]", value)
+    value = LABELED_HOST_RE.sub(
+        lambda match: match.group("label") + "[REDACTED_HOST]", value
+    )
     value = WINDOWS_PATH_RE.sub("[REDACTED_PATH]", value)
     value = UNIX_PATH_RE.sub("[REDACTED_PATH]", value)
     return HOSTNAME_RE.sub("[REDACTED_HOST]", value)
@@ -330,13 +325,15 @@ def sanitize_alert(value, parent_key="", privacy_context=None):
     return value
 
 
-def minimize_report_evidence(alert, privacy_context=None):
-    """Keep only scalar alert fields approved for external AI analysis."""
+def select_ai_alert_fields(alert):
+    """Select bounded fields from the shared AI alert allowlist."""
     if not isinstance(alert, dict):
         return {}
 
     minimized = {}
-    for field in REPORT_EVIDENCE_FIELDS:
+    for field in AI_ALERT_FIELD_ALLOWLIST:
+        if field.endswith(".*"):
+            continue
         value = alert
         for part in field.split("."):
             if not isinstance(value, dict) or part not in value:
@@ -347,7 +344,7 @@ def minimize_report_evidence(alert, privacy_context=None):
         if isinstance(value, float) and not math.isfinite(value):
             continue
         if isinstance(value, (str, int, float, bool)):
-            accepted = value
+            accepted = value[:4096] if isinstance(value, str) else value
         elif isinstance(value, list):
             accepted = [
                 item
@@ -355,10 +352,13 @@ def minimize_report_evidence(alert, privacy_context=None):
                 if isinstance(item, (str, int, float, bool))
                 and not (isinstance(item, float) and not math.isfinite(item))
             ][:50]
+            accepted = [item[:4096] if isinstance(item, str) else item for item in accepted]
             if not accepted:
                 continue
         else:
             continue
+        if field == "agent.name":
+            accepted = "[REDACTED_HOST]"
 
         target = minimized
         parts = field.split(".")
@@ -366,4 +366,32 @@ def minimize_report_evidence(alert, privacy_context=None):
             target = target.setdefault(part, {})
         target[parts[-1]] = accepted
 
-    return sanitize_alert(minimized, privacy_context=privacy_context)
+    mitre = alert.get("rule", {}).get("mitre") if isinstance(alert.get("rule"), dict) else None
+    if isinstance(mitre, dict):
+        def safe_mitre(value):
+            if isinstance(value, dict):
+                return {
+                    str(key): child
+                    for key, item in value.items()
+                    if (child := safe_mitre(item)) is not None
+                }
+            if isinstance(value, list):
+                return [child for item in value[:50] if (child := safe_mitre(item)) is not None]
+            if isinstance(value, (str, int, float, bool)) and not (
+                isinstance(value, float) and not math.isfinite(value)
+            ):
+                return value[:4096] if isinstance(value, str) else value
+            return None
+
+        safe_mitre_value = safe_mitre(mitre)
+        if safe_mitre_value:
+            minimized.setdefault("rule", {})["mitre"] = safe_mitre_value
+
+    return minimized
+
+
+def minimize_report_evidence(alert, privacy_context=None):
+    """Apply the shared AI alert field allowlist and privacy filtering."""
+    return sanitize_alert(
+        select_ai_alert_fields(alert), privacy_context=privacy_context
+    )

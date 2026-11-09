@@ -13,6 +13,7 @@ export interface AiSocOverviewData {
   totalRelation: 'eq' | 'gte';
   severity: Record<'low' | 'medium' | 'high' | 'critical', number>;
   recentAlerts: AiSocRecentAlert[];
+  hiddenAlerts?: number;
 }
 
 export type AiSocQueryFailure = {

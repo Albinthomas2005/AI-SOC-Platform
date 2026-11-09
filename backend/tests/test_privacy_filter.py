@@ -32,6 +32,11 @@ class TestPrivacyFilter(unittest.TestCase):
         self.assertNotIn("8.8.8.8", result)
         self.assertIn("[REDACTED_PUBLIC_IP]", result)
 
+    def test_redacts_public_ipv4_before_sentence_period(self):
+        result = sanitize_text("Public IP 8.8.8.8.")
+        self.assertNotIn("8.8.8.8", result)
+        self.assertEqual(result, "Public IP [REDACTED_PUBLIC_IP].")
+
     def test_public_ipv6_and_integer_field_keep_public_redaction_policy(self):
         result = sanitize_text("8.8.8.8 2606:4700:4700::1111")
         self.assertEqual(result.count("[REDACTED_PUBLIC_IP]"), 2)
@@ -44,6 +49,12 @@ class TestPrivacyFilter(unittest.TestCase):
         left, right = result.split(" -> ")
         self.assertEqual(left, right)
         self.assertTrue(left.startswith("[NONPUBLIC_IP_"))
+
+    def test_pseudonymizes_non_global_reserved_and_shared_addresses(self):
+        result = sanitize_text("198.51.100.9 100.64.0.8")
+        self.assertNotIn("198.51.100.9", result)
+        self.assertNotIn("100.64.0.8", result)
+        self.assertEqual(result.count("[NONPUBLIC_IP_"), 2)
 
     def test_pseudonymizes_private_ipv6(self):
         result = sanitize_text("Source IP: fd12:3456:789a::1")

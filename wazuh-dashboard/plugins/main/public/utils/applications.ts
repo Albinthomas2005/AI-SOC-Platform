@@ -201,6 +201,32 @@ export const analystTraining = {
   redirectTo: () => '/training',
 };
 
+export const securityOperationsWorkbench = {
+  category: 'wz-category-security-operations',
+  id: 'security-operations-workbench',
+  title: i18n.translate('wazuh.securityOperationsWorkbench.app.title', { defaultMessage: 'SOC Workbench' }),
+  breadcrumbLabel: i18n.translate('wazuh.securityOperationsWorkbench.app.breadcrumbLabel', { defaultMessage: 'SOC Workbench' }),
+  description: i18n.translate('wazuh.securityOperationsWorkbench.app.description', { defaultMessage: 'Correlate, investigate, enrich, hunt, and ask about security evidence.' }),
+  euiIconType: 'securityAnalyticsApp',
+  order: 403,
+  showInOverviewApp: true,
+  showInAgentMenu: false,
+  redirectTo: () => '/phase-workbench',
+};
+
+export const labUploads = {
+  category: 'wz-category-security-operations',
+  id: 'lab-uploads',
+  title: i18n.translate('wazuh.labUploads.app.title', { defaultMessage: 'Upload logs' }),
+  breadcrumbLabel: i18n.translate('wazuh.labUploads.app.breadcrumbLabel', { defaultMessage: 'Upload logs' }),
+  description: i18n.translate('wazuh.labUploads.app.description', { defaultMessage: 'Upload documentation-only lab logs for Wazuh decoding and rules.' }),
+  euiIconType: 'upload',
+  order: 404,
+  showInOverviewApp: true,
+  showInAgentMenu: false,
+  redirectTo: () => '/lab-uploads',
+};
+
 export const vulnerabilityDetection = {
   category: 'wz-category-threat-intelligence',
   id: 'vulnerability-detection',
@@ -910,6 +936,8 @@ export const Applications = [
   threatHunting,
   aiSocDashboard,
   analystTraining,
+  securityOperationsWorkbench,
+  labUploads,
   vulnerabilityDetection,
   mitreAttack,
   pciDss,

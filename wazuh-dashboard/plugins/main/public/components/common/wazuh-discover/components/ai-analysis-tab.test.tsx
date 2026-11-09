@@ -1,170 +1,103 @@
 import React from 'react';
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { WzRequest } from '../../../../react-services/wz-request';
 import { AIAnalysisTab } from './ai-analysis-tab';
 
 jest.mock('../../../../react-services/wz-request', () => ({
-  WzRequest: {
-    genericReq: jest.fn(),
-  },
+  WzRequest: { genericReq: jest.fn() },
 }));
 
 const alertReference = { index: 'wazuh-alerts-4.x-2026.10.24', id: 'test-id' };
-const secondAlertReference = {
-  index: 'wazuh-alerts-4.x-2026.10.24',
-  id: 'second-test-id',
+const analysisId = '0123456789abcdef0123456789abcdef';
+const reportResponse = {
+  data: {
+    ok: true,
+    status: 'ai_generated_unverified',
+    analysis_id: analysisId,
+    decision: 'unreviewed',
+    report: '# Synthetic report\n\nReview this finding.',
+  },
 };
 
-const renderKeyedAnalysisTab = ({ index, id }: typeof alertReference) => (
-  <AIAnalysisTab key={`${index}:${id}`} index={index} id={id} />
-);
-
 describe('AIAnalysisTab', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
+  beforeEach(() => jest.clearAllMocks());
 
-  it('requests analysis and safely renders the response as Markdown', async () => {
-    const analysis =
-      '# Findings\n\n**Observed facts**\n\n<script>not executable</script>';
-    (WzRequest.genericReq as jest.Mock).mockResolvedValue({
-      data: { ok: true, analysis },
-    });
+  it('generates a report for the selected alert and exposes its review state', async () => {
+    (WzRequest.genericReq as jest.Mock).mockResolvedValue(reportResponse);
+    render(<AIAnalysisTab {...alertReference} />);
 
-    const { container } = render(<AIAnalysisTab {...alertReference} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Analyze alert' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Generate AI report' }));
 
-    await waitFor(() =>
-      expect(container.querySelector('h1')).toHaveTextContent('Findings'),
-    );
-    expect(container.querySelector('strong')).toHaveTextContent('Observed facts');
-    expect(document.querySelector('script')).toBeNull();
-    expect(container.querySelector('pre')).toBeNull();
+    expect(await screen.findByText('AI draft - not reviewed')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Synthetic report' })).toBeInTheDocument();
     expect(WzRequest.genericReq).toHaveBeenCalledWith(
       'POST',
-      '/api/ai/analyze-alert',
+      '/api/ai/generate-report',
       alertReference,
       { shouldRetry: false, checkCurrentApiIsUp: false },
     );
   });
 
-  it('shows a loading state and prevents duplicate requests', () => {
-    let resolveRequest: (value: unknown) => void = () => undefined;
-    (WzRequest.genericReq as jest.Mock).mockImplementation(
-      () =>
-        new Promise(resolve => {
-          resolveRequest = resolve;
-        }),
-    );
-
-    render(<AIAnalysisTab {...alertReference} />);
-    const button = screen.getByRole('button', { name: 'Analyze alert' });
-    fireEvent.click(button);
-    fireEvent.click(button);
-
-    expect(screen.getByText('Analyzing alert…')).toBeInTheDocument();
-    expect(button).toBeDisabled();
-    expect(WzRequest.genericReq).toHaveBeenCalledTimes(1);
-
-    act(() => {
-      resolveRequest({ data: { ok: true, analysis: 'Done' } });
-    });
-  });
-
-  it('shows a safe error without exposing request details', async () => {
-    (WzRequest.genericReq as jest.Mock).mockRejectedValue(
-      new Error('private URL or token detail'),
-    );
-
-    render(<AIAnalysisTab {...alertReference} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Analyze alert' }));
-
-    expect(
-      await screen.findByText(
-        'AI analysis is unavailable. Check the backend connection and try again.',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/private URL or token detail/)).toBeNull();
-  });
-
-  it('clears the previous alert analysis when the selected alert changes', async () => {
-    (WzRequest.genericReq as jest.Mock).mockResolvedValueOnce({
-      data: { ok: true, analysis: 'Alert A analysis' },
-    });
-
-    const { rerender } = render(renderKeyedAnalysisTab(alertReference));
-    fireEvent.click(screen.getByRole('button', { name: 'Analyze alert' }));
-    expect(await screen.findByText('Alert A analysis')).toBeInTheDocument();
-
-    rerender(renderKeyedAnalysisTab(secondAlertReference));
-
-    expect(screen.queryByText('Alert A analysis')).toBeNull();
-    expect(
-      screen.queryByText(
-        'AI analysis is unavailable. Check the backend connection and try again.',
-      ),
-    ).toBeNull();
-  });
-
-  it('clears the previous alert error when the selected alert changes', async () => {
-    (WzRequest.genericReq as jest.Mock).mockRejectedValueOnce(
-      new Error('synthetic request failure'),
-    );
-
-    const { rerender } = render(renderKeyedAnalysisTab(alertReference));
-    fireEvent.click(screen.getByRole('button', { name: 'Analyze alert' }));
-    expect(
-      await screen.findByText(
-        'AI analysis is unavailable. Check the backend connection and try again.',
-      ),
-    ).toBeInTheDocument();
-
-    rerender(renderKeyedAnalysisTab(secondAlertReference));
-
-    expect(
-      screen.queryByText(
-        'AI analysis is unavailable. Check the backend connection and try again.',
-      ),
-    ).toBeNull();
-    expect(screen.queryByText('Alert A analysis')).toBeNull();
-  });
-
-  it('does not show an old in-flight response after switching alerts', async () => {
-    let resolveAlertA: (value: unknown) => void = () => undefined;
+  it('saves an edited report through the authenticated decision route', async () => {
     (WzRequest.genericReq as jest.Mock)
-      .mockImplementationOnce(
-        () =>
-          new Promise(resolve => {
-            resolveAlertA = resolve;
-          }),
-      )
-      .mockResolvedValueOnce({
-        data: { ok: true, analysis: 'Alert B analysis' },
-      });
+      .mockResolvedValueOnce(reportResponse)
+      .mockResolvedValueOnce({ data: { ok: true, analysis_id: analysisId, decision: 'edited', edited_analysis: 'Analyst-edited report', decided_at: '2026-11-08T00:00:00Z' } });
+    render(<AIAnalysisTab {...alertReference} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate AI report' }));
+    await screen.findByText('AI draft - not reviewed');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Edit AI report' }), { target: { value: 'Analyst-edited report' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save edited report' }));
 
-    const { rerender } = render(renderKeyedAnalysisTab(alertReference));
-    fireEvent.click(screen.getByRole('button', { name: 'Analyze alert' }));
-    expect(screen.getByText('Analyzing alert…')).toBeInTheDocument();
+    expect(await screen.findByText('Analyst-edited report')).toBeInTheDocument();
+    expect(WzRequest.genericReq).toHaveBeenLastCalledWith(
+      'POST',
+      '/api/ai/analysis/decision',
+      { analysis_id: analysisId, decision: 'edited', note: '', edited_analysis: 'Analyst-edited report' },
+      { shouldRetry: false, checkCurrentApiIsUp: false },
+    );
+  });
 
-    rerender(renderKeyedAnalysisTab(secondAlertReference));
-    expect(screen.queryByText('Analyzing alert…')).toBeNull();
+  it.each(['approved', 'rejected'] as const)(
+    'records the %s decision for the generated report',
+    async decision => {
+      (WzRequest.genericReq as jest.Mock)
+        .mockResolvedValueOnce(reportResponse)
+        .mockResolvedValueOnce({ data: { ok: true, analysis_id: analysisId, decision, decided_at: '2026-11-08T00:00:00Z' } });
+      render(<AIAnalysisTab {...alertReference} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Generate AI report' }));
+      await screen.findByText('AI draft - not reviewed');
+      fireEvent.click(screen.getByRole('button', { name: decision === 'approved' ? 'Approve' : 'Reject' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Analyze alert' }));
-    expect(await screen.findByText('Alert B analysis')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(`Analyst decision: ${decision}`)).toBeInTheDocument());
+      expect(WzRequest.genericReq).toHaveBeenLastCalledWith(
+        'POST',
+        '/api/ai/analysis/decision',
+        { analysis_id: analysisId, decision, note: '' },
+        { shouldRetry: false, checkCurrentApiIsUp: false },
+      );
+    },
+  );
 
-    await act(async () => {
-      resolveAlertA({ data: { ok: true, analysis: 'Alert A late analysis' } });
-      await Promise.resolve();
+  it('shows a safe error when report generation fails', async () => {
+    (WzRequest.genericReq as jest.Mock).mockRejectedValue({
+      response: { data: { error: 'AI provider API key is not configured' } },
     });
+    render(<AIAnalysisTab {...alertReference} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate AI report' }));
 
-    expect(screen.getByText('Alert B analysis')).toBeInTheDocument();
-    expect(screen.queryByText('Alert A late analysis')).toBeNull();
+    expect(await screen.findByText('AI provider API key is not configured')).toBeInTheDocument();
+  });
+
+  it('does not show untrusted provider error text', async () => {
+    (WzRequest.genericReq as jest.Mock).mockRejectedValue({
+      response: { data: { error: 'secret=private-key' } },
+    });
+    render(<AIAnalysisTab {...alertReference} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate AI report' }));
+
+    expect(await screen.findByText('AI report generation failed. Check the backend connection and try again.')).toBeInTheDocument();
+    expect(screen.queryByText(/secret=private-key/)).toBeNull();
   });
 });

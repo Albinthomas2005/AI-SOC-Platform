@@ -52,6 +52,19 @@ an alert-field allowlist and privacy filtering before provider calls. A local
 analyst decision record can mark generated output approved, edited, or
 rejected.
 
+## Features
+
+- AI SOC Dashboard and SOC Workbench for reviewing Wazuh alert evidence.
+- Optional lab log uploads. Uploaded lines are appended to a configured local
+  file for Wazuh's own localfile collection, decoders, and rules; the platform
+  does not synthesize OpenSearch alerts. Injection is disabled by default.
+- Three documentation-only sample packs and platform-only upload metadata
+  deletion. Deleting a record does not delete alerts already created in Wazuh.
+
+See [Wazuh lab setup](docs/LAB_SETUP.md) for the required localfile
+configuration and manual manager restart. Windows text uploads do not create
+Windows detections.
+
 ## Architecture
 
 ```mermaid
@@ -100,14 +113,25 @@ to Groq; an optional Ollama adapter accepts only a localhost or loopback URL.
 
 ## Project status
 
-| Done | Pending |
+| Phase | Status |
 |---|---|
-| Training routes and client-side Markdown export are implemented; smoke checks were not run for this task. | Review the 16 draft answer keys with analysts. |
-| Backend suite: 110 tests passed for this cherry-pick task, using temporary databases and mocked providers. | Rerun the synthetic evaluation and review its results. |
-| Backend runner and training endpoint smoke script are in place; the smoke script was not run for this task. | Capture real Training Mode screenshots under `docs/screenshots/`. |
-| `git diff --check` passed for this task. | Build and install the Dashboard plugin in its pinned environment; not run for this task. |
+| 1: backend analysis, report review/decisions, training, shifts, port configuration | Implemented, unverified in browser |
+| 4: deterministic correlation API and timeline | Implemented, unverified in browser |
+| 5: incident API, validated status transitions, evidence, notes and reports | Implemented, unverified in browser |
+| 6: public IOC extraction, privacy filtering, provider adapters, cache and limits | Implemented, unverified in browser; live providers not checked |
+| 7: validated read-only hunting workflow | Implemented, unverified in browser |
+| 9: role-scoped evidence assistant | Implemented, unverified in browser |
+| 10a: role enforcement and append-only audit | Implemented, unverified in browser |
+| 10b: dry-run retention and request/rate limits | Implemented, unverified in browser |
+| Plugin workbench for correlation, incidents, intel, hunting, audit and assistant | Implemented, unverified in browser; plugin tests written, not run |
+| Evaluation CLI | Implemented with mocked tests; live evaluation not run |
 
-Live provider behavior and the Dashboard UI were not verified in this task.
+Pending: browser test, Dashboard plugin build, screenshots, analyst review of
+the 16 **DRAFT** answer keys, evaluation rerun/live evaluation, event-correlation
+browser review, production data retention/load test, and production readiness.
+The backend suite has passed **162 tests** in the latest audited-branch run; the smoke
+script, browser UI, plugin build, live provider behavior, and live evaluation
+have not been run for this workbench update.
 
 ## Training Mode
 
@@ -194,9 +218,14 @@ same value in the trusted Wazuh Dashboard service environment. Do not paste
 either secret into source control, logs, the browser, or this repository.
 `backend/.env.example` and the root `.env.example` contain placeholders only.
 
-The backend defaults to `127.0.0.1:5000`. `SOC_AI_HOST` accepts loopback values
-by default; non-loopback binding requires `SOC_AI_ALLOW_NON_LOOPBACK=true` and
-separate network controls. Do not expose port 5000 to the network.
+The backend defaults to `127.0.0.1:5000`. `SOC_AI_PORT` sets the port used by
+the Flask service, Dashboard server, scripts, and evaluator. `SOC_AI_HOST` accepts
+loopback values by default; non-loopback binding requires
+`SOC_AI_ALLOW_NON_LOOPBACK=true` and separate network controls. Do not expose
+the backend port to the network.
+
+`SOC_AI_DB_PATH` optionally selects a different SQLite database and is read
+when each database connection is opened, including after `.env` is loaded.
 
 Start the backend from `backend/`:
 
@@ -221,17 +250,17 @@ The root workflow [`.github/workflows/backend-tests.yml`](.github/workflows/back
 runs the same command on pushes and pull requests to `main`, with Python 3.12.
 The separate plugin build workflow is manually dispatched.
 
-With the backend running and `SOC_AI_INTERNAL_TOKEN` set in `backend/.env`,
-run the synthetic evaluation from `backend/`:
+With the backend running and `GROQ_API_KEY` plus `SOC_AI_INTERNAL_TOKEN`
+exported in its process environment, run the synthetic evaluation from `backend/`:
 
 ```bash
 python scripts/run_eval.py --delay 1 --save-responses eval-responses
 ```
 
-The harness writes its summary to `documentation/evaluation.md`. Saved
+The harness writes its summary to `docs/EVALUATION_RESULTS.md`. Saved
 response bodies may contain sanitized but identifying context; keep them
-local. The `eval-responses/` directory is ignored by Git. No evaluation was
-run for the current prompt/schema changes.
+local. The `eval-responses/` directory is ignored by Git. The live evaluation
+was not run for this stabilization task.
 
 ## Dashboard plugin build and installation
 
@@ -264,11 +293,11 @@ This host install has not yet been verified.
 
 ## Privacy and limitations
 
-The filter masks selected email, token, secret, and address patterns. Strict
-mode optionally masks common hostnames, URLs, MAC addresses, usernames, and
-paths. It does not prove anonymization; allowlisted descriptions and analyst
-notes can still contain identifying details and are sent to a third-party AI
-provider. Review data handling before using non-synthetic alerts.
+The provider boundary masks selected email, token, secret, address, hostname,
+URL, MAC, username, and path patterns. This does not prove anonymization;
+allowlisted descriptions and analyst notes can still contain identifying
+details and are sent to a third-party AI provider. Review data handling before
+using non-synthetic alerts.
 
 AI output may be wrong or incomplete. The local ATT&CK catalog checks whether
 technique IDs exist; it does not establish that an AI mapping fits the evidence.

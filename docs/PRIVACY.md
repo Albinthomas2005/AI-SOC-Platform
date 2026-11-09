@@ -26,12 +26,12 @@ The filter does not alter input objects in place. A new pseudonym context is
 created per analysis request; pseudonyms are not meant to correlate data
 between requests.
 
-## Optional strict mode
+## Additional provider-boundary filtering
 
-Setting `SOC_AI_STRICT_PRIVACY=true` (exact lowercase) additionally masks
-common URLs, fully qualified hostnames, MAC addresses, explicitly labeled
-usernames/accounts, and absolute Unix or Windows path tokens. Strict mode can
-remove useful investigative evidence and remains opt-in.
+The provider boundary also masks common URLs, fully qualified hostnames, MAC
+addresses, explicitly labeled usernames/accounts, and absolute Unix or Windows
+path tokens. This pattern-based filtering can remove useful investigative
+details, but does not identify every internal hostname or arbitrary identifier.
 
 ## What is sent to the provider
 
@@ -52,8 +52,8 @@ data until the privacy behavior has been reviewed for your deployment.
 
 ## Known gaps
 
-- Default mode does not mask hostnames, URLs, MAC addresses, usernames, or file
-  paths as a whole.
+- Hostname filtering catches fully qualified names that match the configured
+  pattern; single-label internal names and other identifiers may remain.
 - It does not recognize every obfuscation, encoding, secret format, or command
   output. Bare numbers are intentionally preserved to avoid rewriting rule
   IDs and ports.

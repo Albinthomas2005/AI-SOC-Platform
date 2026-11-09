@@ -50,9 +50,7 @@ type NeedlePost = (
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const needle = require('needle') as NeedlePost;
 
-const AI_SERVICE_BASE_URL =
-  process.env.SOC_AI_BASE_URL ||
-  `http://${process.env.SOC_AI_HOST || '127.0.0.1'}:${process.env.SOC_AI_PORT || '5000'}`;
+const AI_SERVICE_BASE_URL = `http://${process.env.SOC_AI_HOST || '127.0.0.1'}:${process.env.SOC_AI_PORT || '5000'}`;
 const AI_SERVICE_URL = `${AI_SERVICE_BASE_URL}/api/ai/analyze-alert`;
 const AI_REPORT_SERVICE_URL = `${AI_SERVICE_BASE_URL}/api/ai/generate-report`;
 const AI_DECISION_SERVICE_URL = `${AI_SERVICE_BASE_URL}/api/ai/analysis`;
@@ -207,7 +205,7 @@ export class WazuhAiCtrl {
       const result = await context.core.opensearch.client.asCurrentUser.search({ index: body.index, body: { size: 1, track_total_hits: false, query: { ids: { values: [body.id] } }, _source: ALLOWED_ALERT_FIELDS } });
       const source = result?.body?.hits?.hits?.[0]?._source;
       if (!source) return response.custom({ statusCode: 404, body: { ok: false, error: 'Alert is unavailable' } });
-      const upstream = await needle('post', `${TRAINING_SERVICE_URL}/imported-cases`, { alert: minimizeAlert(source), user_id: username }, { json: true, headers: { Authorization: `Bearer ${token}` }, open_timeout: AI_SERVICE_TIMEOUT_MS, response_timeout: AI_SERVICE_TIMEOUT_MS });
+      const upstream = await needle('post', `${TRAINING_SERVICE_URL}/imported-cases`, { alert: minimizeAlert(source), user_id: username }, { json: true, headers: { Authorization: `Bearer ${token}`, 'X-SOC-User': username }, open_timeout: AI_SERVICE_TIMEOUT_MS, response_timeout: AI_SERVICE_TIMEOUT_MS });
       return response.custom({ statusCode: upstream.statusCode || 502, body: upstream.body });
     } catch (error) {
       if (getErrorStatusCode(error) === 403) return response.custom({ statusCode: 403, body: { ok: false, error: 'Access to this alert is denied' } });
@@ -244,7 +242,7 @@ export class WazuhAiCtrl {
     try {
       const upstream = await needle(method, target, body, {
         json: true,
-        headers: { Authorization: `Bearer ${internalToken}` },
+        headers: { Authorization: `Bearer ${internalToken}`, 'X-SOC-User': username },
         // eslint-disable-next-line camelcase
         open_timeout: AI_SERVICE_TIMEOUT_MS,
         // eslint-disable-next-line camelcase
@@ -269,6 +267,7 @@ export class WazuhAiCtrl {
     request: OpenSearchDashboardsRequest,
     response: OpenSearchDashboardsResponseFactory,
   ) {
+    let username: string;
     try {
       const currentUser = await context.wazuh.security.getCurrentUser(
         request,
@@ -280,6 +279,7 @@ export class WazuhAiCtrl {
           body: { ok: false, error: 'Authentication required' },
         });
       }
+      username = currentUser.username;
     } catch {
       return response.custom({
         statusCode: 401,
@@ -389,6 +389,7 @@ export class WazuhAiCtrl {
           json: true,
           headers: {
             Authorization: `Bearer ${internalToken}`,
+            'X-SOC-User': username,
           },
           // Needle names these timeout options with underscores.
           // eslint-disable-next-line camelcase
@@ -437,6 +438,7 @@ export class WazuhAiCtrl {
     request: OpenSearchDashboardsRequest,
     response: OpenSearchDashboardsResponseFactory,
   ) {
+    let username: string;
     try {
       const currentUser = await context.wazuh.security.getCurrentUser(
         request,
@@ -448,6 +450,7 @@ export class WazuhAiCtrl {
           body: { ok: false, error: 'Authentication required' },
         });
       }
+      username = currentUser.username;
     } catch {
       return response.custom({
         statusCode: 401,
@@ -501,10 +504,7 @@ export class WazuhAiCtrl {
     if (!internalToken) {
       return response.custom({
         statusCode: 503,
-        body: {
-          ok: false,
-          error: 'AI report generation is temporarily unavailable',
-        },
+        body: { ok: false, error: 'Backend authentication failed', reason: 'bad_token' },
       });
     }
 
@@ -573,7 +573,7 @@ export class WazuhAiCtrl {
         reportRequest,
         {
           json: true,
-          headers: { Authorization: 'Bearer ' + internalToken },
+          headers: { Authorization: 'Bearer ' + internalToken, 'X-SOC-User': username },
           // eslint-disable-next-line camelcase
           open_timeout: AI_SERVICE_TIMEOUT_MS,
           // eslint-disable-next-line camelcase
@@ -604,11 +604,31 @@ export class WazuhAiCtrl {
         typeof upstream.body.report !== 'string' ||
         !upstream.body.report.trim()
       ) {
+        const safeFailureReasons = [
+          'missing_api_key',
+          'provider_unreachable',
+          'timeout',
+          'rate_limited',
+          'bad_token',
+          'provider_error',
+        ];
+        const reason = safeFailureReasons.includes(upstream.body?.reason)
+          ? upstream.body.reason
+          : 'provider_error';
+        const safeErrors: Record<string, string> = {
+          missing_api_key: 'AI provider API key is not configured',
+          provider_unreachable: 'AI provider is unreachable',
+          timeout: 'AI provider request timed out',
+          rate_limited: 'AI provider rate limit was reached',
+          bad_token: 'Backend authentication failed',
+          provider_error: 'AI report generation failed',
+        };
         return response.custom({
           statusCode: 503,
           body: {
             ok: false,
-            error: 'AI report generation is temporarily unavailable',
+            error: safeErrors[reason],
+            reason,
           },
         });
       }
@@ -624,12 +644,16 @@ export class WazuhAiCtrl {
           decided_at: upstream.body.decided_at,
         },
       });
-    } catch {
+    } catch (error) {
+      const reason = /timeout/i.test(String((error as Error)?.name))
+        ? 'timeout'
+        : 'provider_unreachable';
       return response.custom({
         statusCode: 503,
         body: {
           ok: false,
-          error: 'AI report generation is temporarily unavailable',
+          error: reason === 'timeout' ? 'AI provider request timed out' : 'AI provider is unreachable',
+          reason,
         },
       });
     }
@@ -640,6 +664,7 @@ export class WazuhAiCtrl {
     request: OpenSearchDashboardsRequest,
     response: OpenSearchDashboardsResponseFactory,
   ) {
+    let username: string;
     try {
       const currentUser = await context.wazuh.security.getCurrentUser(
         request,
@@ -651,6 +676,7 @@ export class WazuhAiCtrl {
           body: { ok: false, error: 'Authentication required' },
         });
       }
+      username = currentUser.username;
     } catch {
       return response.custom({
         statusCode: 401,
@@ -692,7 +718,7 @@ export class WazuhAiCtrl {
         { decision, note, edited_analysis: editedAnalysis },
         {
           json: true,
-          headers: { Authorization: `Bearer ${internalToken}` },
+          headers: { Authorization: `Bearer ${internalToken}`, 'X-SOC-User': username },
           // eslint-disable-next-line camelcase
           open_timeout: AI_SERVICE_TIMEOUT_MS,
           // eslint-disable-next-line camelcase

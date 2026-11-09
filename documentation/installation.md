@@ -14,7 +14,10 @@ python -m unittest discover -s tests -v
 
 The dashboard source is pinned to Wazuh `4.14.9` and OpenSearch Dashboards `2.19.6` (see `wazuh-dashboard/VERSION.json` and plugin manifests). Build and test it in the matching full Wazuh Dashboard development environment, following `wazuh-dashboard/docs/dev/setup.md` and `wazuh-dashboard/docs/dev/run-tests.md`.
 
-Configure `SOC_AI_INTERNAL_TOKEN` in the Dashboard server process environment. Its value must match the backend token. The backend URL is loopback (`127.0.0.1:5000`) in the plugin controller; adjust deployment networking only when both services are protected accordingly.
+Configure `SOC_AI_INTERNAL_TOKEN` and the same `SOC_AI_PORT` in the Dashboard
+server and backend process environments. The port defaults to `5000`; the
+plugin controller and backend runner both read `SOC_AI_PORT`. Keep the host on
+loopback unless deployment networking has been separately reviewed.
 
 ## Data
 
