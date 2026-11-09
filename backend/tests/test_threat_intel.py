@@ -69,15 +69,17 @@ class ThreatIntelTests(unittest.TestCase):
     def test_alert_extraction_skips_secret_and_hostname_fields(self):
         iocs = extract_iocs({
             "agent": {"name": "build-server.example.org"},
+            "hostname": "not-allowed.example.com",
             "password": "bad-password.example.net",
             "data": {
                 "srcip": "192.168.1.4",
-                "description": "Public indicator https://ioc.example.org/check",
             },
+            "rule": {"description": "Public indicator https://ioc.example.org/check"},
         })
         serialized = str(iocs)
         self.assertIn("ioc.example.org", serialized)
         self.assertNotIn("build-server", serialized)
+        self.assertNotIn("not-allowed.example.com", serialized)
         self.assertNotIn("bad-password", serialized)
         self.assertNotIn("192.168.1.4", serialized)
 
@@ -161,7 +163,8 @@ class ThreatIntelTests(unittest.TestCase):
                 "/api/threat-intel/lookup",
                 json={"alert": {
                     "agent": {"name": "host01.corp.local"},
-                    "data": {"srcip": "10.0.0.4", "description": "8.8.8.8"},
+                    "data": {"srcip": "10.0.0.4"},
+                    "rule": {"description": "Contact from 8.8.8.8"},
                 }},
                 headers=HEADERS,
             )

@@ -52,6 +52,19 @@ an alert-field allowlist and privacy filtering before provider calls. A local
 analyst decision record can mark generated output approved, edited, or
 rejected.
 
+## Features
+
+- AI SOC Dashboard and SOC Workbench for reviewing Wazuh alert evidence.
+- Optional lab log uploads. Uploaded lines are appended to a configured local
+  file for Wazuh's own localfile collection, decoders, and rules; the platform
+  does not synthesize OpenSearch alerts. Injection is disabled by default.
+- Three documentation-only sample packs and platform-only upload metadata
+  deletion. Deleting a record does not delete alerts already created in Wazuh.
+
+See [Wazuh lab setup](docs/LAB_SETUP.md) for the required localfile
+configuration and manual manager restart. Windows text uploads do not create
+Windows detections.
+
 ## Architecture
 
 ```mermaid

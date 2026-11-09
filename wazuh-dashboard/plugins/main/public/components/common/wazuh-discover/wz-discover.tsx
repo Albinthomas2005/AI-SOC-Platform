@@ -24,7 +24,7 @@ import {
   getAllCustomRenders,
 } from '../data-grid';
 import { DocumentViewTableAndJson } from './components/document-view-table-and-json';
-import { AIAnalysisTab } from './components/ai-analysis-tab';
+import { createModuleAIAnalysisTabs } from './components/ai-analysis-tabs';
 import {
   ErrorHandler,
   ErrorFactory,
@@ -220,22 +220,10 @@ const WazuhDiscoverComponent = (props: WazuhDiscoverProps) => {
   };
 
   const closeFlyoutHandler = () => setInspectedHit(undefined);
-  const additionalDocumentDetailsTabs =
-    moduleId === 'threat-hunting' && inspectedHit?._source
-      ? [
-        {
-          id: 'ai-analysis',
-          name: 'AI Analysis',
-          content: (
-            <AIAnalysisTab
-              key={`${inspectedHit._index}:${inspectedHit._id}`}
-              index={inspectedHit._index}
-              id={inspectedHit._id}
-            />
-          ),
-        },
-      ]
-      : [];
+  const additionalDocumentDetailsTabs = createModuleAIAnalysisTabs(
+    moduleId,
+    inspectedHit,
+  );
 
   return (
     <IntlProvider locale='en'>

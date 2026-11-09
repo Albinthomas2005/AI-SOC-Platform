@@ -12,6 +12,7 @@ from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from database import get_connection
+from privacy_filter import select_ai_alert_fields
 
 
 IPV4_CANDIDATE = re.compile(r"(?<![A-Za-z0-9_.])(?:\d{1,3}\.){3}\d{1,3}(?![A-Za-z0-9_.])")
@@ -82,7 +83,7 @@ def extract_iocs(value):
     def safe_text(item, key=""):
         if re.search(r"(?i)(password|passwd|token|secret|api[_-]?key|authorization|credential|private[_-]?key)", key):
             return ""
-        if re.search(r"(?i)^(?:host|hostname|agent)$", key):
+        if re.search(r"(?i)^(?:host|hostname|agent|agent\.name)$", key):
             return ""
         if isinstance(item, dict):
             return " ".join(
@@ -96,6 +97,8 @@ def extract_iocs(value):
             return str(item)
         return ""
 
+    if isinstance(value, dict):
+        value = select_ai_alert_fields(value)
     text = safe_text(value) if not isinstance(value, str) else value
     indicators = {}
 

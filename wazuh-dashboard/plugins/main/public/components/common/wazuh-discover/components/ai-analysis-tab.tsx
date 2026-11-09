@@ -4,7 +4,6 @@ import {
   EuiCallOut,
   EuiFlexGroup,
   EuiFlexItem,
-  EuiMarkdownFormat,
   EuiPanel,
   EuiSpacer,
   EuiText,
@@ -20,8 +19,16 @@ interface AIAnalysisTabProps {
 
 type Decision = 'unreviewed' | 'approved' | 'edited' | 'rejected';
 
-const AI_ANALYSIS_ERROR =
-  'AI report is unavailable. Check the backend connection and try again.';
+const DEFAULT_AI_ANALYSIS_ERROR =
+  'AI report generation failed. Check the backend connection and try again.';
+const SAFE_FAILURE_MESSAGES = new Set([
+  'AI provider API key is not configured',
+  'AI provider is unreachable',
+  'AI provider request timed out',
+  'AI provider rate limit was reached',
+  'Backend authentication failed',
+  'AI report generation failed',
+]);
 
 export const AIAnalysisTab = ({ index, id }: AIAnalysisTabProps) => {
   const [report, setReport] = useState<string>();
@@ -29,7 +36,7 @@ export const AIAnalysisTab = ({ index, id }: AIAnalysisTabProps) => {
   const [decision, setDecision] = useState<Decision>('unreviewed');
   const [isLoading, setIsLoading] = useState(false);
   const [decisionLoading, setDecisionLoading] = useState(false);
-  const [hasError, setHasError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string>();
   const [decisionError, setDecisionError] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editedReport, setEditedReport] = useState('');
@@ -41,7 +48,7 @@ export const AIAnalysisTab = ({ index, id }: AIAnalysisTabProps) => {
 
     requestInFlight.current = true;
     setIsLoading(true);
-    setHasError(false);
+    setErrorMessage(undefined);
     setReport(undefined);
     setAnalysisId(undefined);
 
@@ -72,8 +79,13 @@ export const AIAnalysisTab = ({ index, id }: AIAnalysisTabProps) => {
       setDecisionNote('');
       setDecisionError(false);
       setIsEditing(false);
-    } catch {
-      setHasError(true);
+    } catch (error) {
+      const message = (error as any)?.response?.data?.error;
+      setErrorMessage(
+        typeof message === 'string' && SAFE_FAILURE_MESSAGES.has(message)
+          ? message
+          : DEFAULT_AI_ANALYSIS_ERROR,
+      );
     } finally {
       requestInFlight.current = false;
       setIsLoading(false);
@@ -131,7 +143,7 @@ export const AIAnalysisTab = ({ index, id }: AIAnalysisTabProps) => {
       </EuiFlexItem>
 
       {isLoading && <EuiFlexItem grow={false}><EuiText size='s'>Generating an unverified AI report…</EuiText></EuiFlexItem>}
-      {hasError && <EuiFlexItem><EuiCallOut color='danger' iconType='alert' title={AI_ANALYSIS_ERROR} /></EuiFlexItem>}
+      {errorMessage && <EuiFlexItem><EuiCallOut color='danger' iconType='alert' title={errorMessage} /></EuiFlexItem>}
       {report !== undefined && (
         <EuiFlexItem>
           <EuiCallOut color={decision === 'unreviewed' ? 'warning' : 'success'} title={decision === 'unreviewed' ? 'AI draft - not reviewed' : `Analyst decision: ${decision}`}>
@@ -143,7 +155,7 @@ export const AIAnalysisTab = ({ index, id }: AIAnalysisTabProps) => {
             <EuiSpacer size='s' />
             {isEditing ? (
               <EuiTextArea aria-label='Edit AI report' fullWidth rows={12} value={editedReport} onChange={event => setEditedReport(event.target.value)} />
-            ) : <EuiMarkdownFormat>{report}</EuiMarkdownFormat>}
+            ) : <EuiText component='pre' size='s' style={{ whiteSpace: 'pre-wrap' }}>{report}</EuiText>}
             <EuiSpacer size='s' />
             <EuiTextArea aria-label='Analyst decision note' placeholder='Optional analyst note' fullWidth rows={2} value={decisionNote} onChange={event => setDecisionNote(event.target.value)} />
             <EuiSpacer size='s' />

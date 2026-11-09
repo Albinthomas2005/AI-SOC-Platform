@@ -146,6 +146,28 @@ describe('POST /api/ai/generate-report controller', () => {
     expect(needle).not.toHaveBeenCalled();
   });
 
+  it('forwards only a safe provider failure reason to the UI', async () => {
+    needle.mockResolvedValueOnce({
+      statusCode: 503,
+      body: {
+        ok: false,
+        reason: 'missing_api_key',
+        error: 'secret key and prompt must not be forwarded',
+      },
+    });
+    const result = await controller.generateReport(
+      createContext(),
+      createRequest(),
+      createResponse() as any,
+    );
+    expect(result.body).toEqual({
+      ok: false,
+      error: 'AI provider API key is not configured',
+      reason: 'missing_api_key',
+    });
+    expect(JSON.stringify(result)).not.toContain('secret key');
+  });
+
   it('forwards analyst decisions to the protected backend endpoint', async () => {
     needle.mockResolvedValueOnce({
       statusCode: 200,
