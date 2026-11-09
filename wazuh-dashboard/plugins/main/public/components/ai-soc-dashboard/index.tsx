@@ -13,6 +13,7 @@ import {
   EuiPanel,
   EuiSpacer,
   EuiStat,
+  EuiSwitch,
   EuiTextArea,
   EuiText,
   EuiTitle,
@@ -34,6 +35,10 @@ const openSecurityOperationsWorkbench = () => {
   );
 };
 
+const openLabUploads = () => {
+  void NavigationService.getInstance().navigateToApp('lab-uploads');
+};
+
 function displayTimestamp(timestamp?: string): string {
   if (!timestamp || Number.isNaN(Date.parse(timestamp))) return '—';
   return new Date(timestamp).toLocaleString();
@@ -51,7 +56,9 @@ type ReportState = {
 };
 
 export const AiSocDashboard: React.FC = () => {
-  const result = useAiSocOverview();
+  const [labOnly, setLabOnly] = useState(false);
+  const [labStatusError, setLabStatusError] = useState('');
+  const result = useAiSocOverview(labOnly);
   const [report, setReport] = useState<ReportState>();
   const [reportError, setReportError] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
@@ -66,6 +73,14 @@ export const AiSocDashboard: React.FC = () => {
     result.status === 'error' || result.status === 'unavailable'
       ? result.error
       : undefined;
+
+  React.useEffect(() => {
+    let active = true;
+    WzRequest.genericReq('GET', '/api/phase/lab/status', undefined, { shouldRetry: false, checkCurrentApiIsUp: false })
+      .then((response: any) => { if (active && response?.data?.uploads_exist) setLabOnly(true); })
+      .catch(() => { if (active) setLabStatusError('Lab filter status is unavailable'); });
+    return () => { active = false; };
+  }, []);
 
   const generateReport = async (alert: AiSocRecentAlert) => {
     if (requestInFlight.current) return;
@@ -218,6 +233,9 @@ export const AiSocDashboard: React.FC = () => {
               >
                 Workbench
               </EuiButton>
+              <EuiButton onClick={openLabUploads} iconType='upload'>
+                Upload logs
+              </EuiButton>
               <EuiButton
                 onClick={openThreatHuntingAlerts}
                 iconType='arrowRight'
@@ -227,6 +245,9 @@ export const AiSocDashboard: React.FC = () => {
             </EuiFlexItem>
           </EuiFlexGroup>
           <EuiSpacer size='m' />
+          <EuiSwitch label='Lab only' checked={labOnly} onChange={event => setLabOnly(event.target.checked)} />
+          {labOnly && data && <EuiText size='s'>Hiding {data.hiddenAlerts || 0} alerts without SOCLAB-INJECT.</EuiText>}
+          {labStatusError && <EuiText color='subdued'>{labStatusError}</EuiText>}
           {result.status === 'loading' && (
             <EuiFlexGroup alignItems='center'>
               <EuiFlexItem grow={false}>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { EuiButton, EuiCallOut, EuiCodeBlock, EuiFormRow, EuiPanel, EuiSelect, EuiSpacer, EuiTabs, EuiTab, EuiTextArea, EuiTitle } from '@elastic/eui';
+import { EuiButton, EuiCallOut, EuiCodeBlock, EuiFormRow, EuiPanel, EuiSelect, EuiSpacer, EuiSwitch, EuiTabs, EuiTab, EuiTextArea, EuiTitle } from '@elastic/eui';
 import { WzRequest } from '../../react-services/wz-request';
 
 const tabs = ['Correlation', 'Incidents', 'Threat intel', 'Hunting', 'Audit', 'Assistant'];
@@ -16,6 +16,16 @@ export const PhaseWorkbench: React.FC = () => {
   const [incidentId, setIncidentId] = useState('');
   const [status, setStatus] = useState('Investigating');
   const [note, setNote] = useState('');
+  const [labOnly, setLabOnly] = useState(false);
+  const [hiddenAlerts, setHiddenAlerts] = useState(0);
+
+  React.useEffect(() => {
+    let active = true;
+    WzRequest.genericReq('GET', '/api/phase/lab/status', undefined, { shouldRetry: false, checkCurrentApiIsUp: false })
+      .then((response: any) => { if (active && response?.data?.uploads_exist) setLabOnly(true); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const call = async (method: string, path: string, body?: any) => {
     setError('');
@@ -35,12 +45,20 @@ export const PhaseWorkbench: React.FC = () => {
   const parseRefs = () => {
     try { return JSON.parse(refs); } catch { setError('Alert references must be valid JSON'); return undefined; }
   };
+  const selectedRefs = async () => {
+    const refs = parseRefs();
+    if (!refs || !labOnly) return refs;
+    const result = await call('POST', '/api/phase/lab/filter', { alert_refs: refs });
+    if (!Array.isArray(result?.alert_refs)) return undefined;
+    setHiddenAlerts(result.hidden_count || 0);
+    return result.alert_refs;
+  };
   const loadIncidents = async () => {
     const data = await call('GET', '/api/phase/incidents');
     if (Array.isArray(data?.incidents)) setIncidents(data.incidents);
   };
   const act = async () => {
-    const alert_refs = parseRefs();
+    const alert_refs = (tab === 0 || tab === 2 || tab === 5) ? await selectedRefs() : undefined;
     if (tab === 0 && alert_refs) await call('POST', '/api/phase/correlations/run', { alert_refs });
     if (tab === 2 && alert_refs) await call('POST', '/api/phase/threat-intel/lookup', { alert_refs });
     if (tab === 3) await call('POST', '/api/hunts/run', { question });
@@ -53,13 +71,15 @@ export const PhaseWorkbench: React.FC = () => {
     if (correlation) {
       await call('POST', '/api/phase/incidents', { correlation_group: correlation, title: 'Correlated alert investigation' });
     } else {
-      const alert_refs = parseRefs();
+      const alert_refs = await selectedRefs();
       if (alert_refs) await call('POST', '/api/phase/correlations/run', { alert_refs });
     }
   };
 
   return <div className="wz-padding-16">
     <EuiTitle size="m"><h1>Security Operations Workbench</h1></EuiTitle><EuiSpacer />
+    <EuiSwitch label="Lab only" checked={labOnly} onChange={event => setLabOnly(event.target.checked)} />
+    {labOnly && <p>Hiding {hiddenAlerts} alerts without SOCLAB-INJECT from the supplied references.</p>}
     <EuiTabs>{tabs.map((label, index) => <EuiTab key={label} onClick={() => { setTab(index); setError(''); }} isSelected={tab === index}>{label}</EuiTab>)}</EuiTabs>
     <EuiSpacer />
     <EuiPanel>

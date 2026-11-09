@@ -54,7 +54,7 @@ export class WazuhPhaseCtrl {
   }
 
   private async backend(
-    method: 'get' | 'post',
+    method: 'get' | 'post' | 'delete',
     path: string,
     body: unknown,
     username: string,
@@ -152,7 +152,29 @@ export class WazuhPhaseCtrl {
     return this.backend('post', '/api/threat-intel/lookup', { alert }, username, response);
   }
 
-  async proxy(context: RequestHandlerContext, request: OpenSearchDashboardsRequest, response: OpenSearchDashboardsResponseFactory, method: 'get' | 'post', path: string, body?: unknown) {
+  async filterLabAlerts(context: RequestHandlerContext, request: OpenSearchDashboardsRequest, response: OpenSearchDashboardsResponseFactory) {
+    if (!(await this.currentUsername(context, request))) return response.custom({ statusCode: 401, body: { ok: false, error: 'Authentication required' } });
+    const references = (request.body || {}).alert_refs;
+    if (!Array.isArray(references) || references.length > 50) return response.custom({ statusCode: 400, body: { ok: false, error: 'Provide up to 50 alert references' } });
+    let pattern: unknown;
+    try { pattern = await context.wazuh_core.configuration.getSettingValue('pattern'); }
+    catch { return response.custom({ statusCode: 503, body: { ok: false, error: 'Alert search is unavailable' } }); }
+    const filtered = [];
+    for (const reference of references) {
+      if (!reference || !validAlertRef(reference.index, reference.id, pattern)) return response.custom({ statusCode: 400, body: { ok: false, error: 'Invalid Wazuh alert reference' } });
+      try {
+        const result = await context.core.opensearch.client.asCurrentUser.search({
+          index: reference.index,
+          body: { size: 1, query: { ids: { values: [reference.id] } }, _source: ['full_log'] },
+        });
+        const hit = result?.body?.hits?.hits?.[0];
+        if (typeof hit?._source?.full_log === 'string' && hit._source.full_log.includes('SOCLAB-INJECT')) filtered.push(reference);
+      } catch { return response.custom({ statusCode: 503, body: { ok: false, error: 'Alert search is unavailable' } }); }
+    }
+    return response.ok({ body: { ok: true, alert_refs: filtered, hidden_count: references.length - filtered.length } });
+  }
+
+  async proxy(context: RequestHandlerContext, request: OpenSearchDashboardsRequest, response: OpenSearchDashboardsResponseFactory, method: 'get' | 'post' | 'delete', path: string, body?: unknown) {
     const username = await this.currentUsername(context, request);
     if (!username) return response.custom({ statusCode: 401, body: { ok: false, error: 'Authentication required' } });
     let target = path;

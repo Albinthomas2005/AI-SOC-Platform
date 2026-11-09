@@ -38,6 +38,7 @@ const data = {
 describe('AiSocDashboard', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (WzRequest.genericReq as jest.Mock).mockResolvedValue({ data: { uploads_exist: false } });
     (useAiSocOverview as jest.Mock).mockReturnValue({
       status: 'available',
       data,
@@ -73,6 +74,11 @@ describe('AiSocDashboard', () => {
     render(<AiSocDashboard />);
     fireEvent.click(screen.getByRole('button', { name: 'Workbench' }));
     expect(navigateToApp).toHaveBeenCalledWith('security-operations-workbench');
+  });
+  it('renders the Lab only toggle and enables filtering when selected', () => {
+    render(<AiSocDashboard />);
+    fireEvent.click(screen.getByRole('switch', { name: 'Lab only' }));
+    expect(useAiSocOverview).toHaveBeenLastCalledWith(true);
   });
   it('keeps the SOC Workbench registered in the left navigation application list', () => {
     expect(Applications.some(application => application.id === 'security-operations-workbench')).toBe(true);

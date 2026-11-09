@@ -4,6 +4,13 @@ import { WazuhPhaseCtrl } from '../controllers';
 
 export function WazuhPhaseRoutes(router: IRouter) {
   const ctrl = new WazuhPhaseCtrl();
+  router.post({ path: '/api/phase/lab/filter', validate: false, options: { body: { maxBytes: 16 * 1024 } } }, (context, request, response) => ctrl.filterLabAlerts(context, request, response));
+  router.get({ path: '/api/phase/lab/status', validate: false }, (context, request, response) => ctrl.proxy(context, request, response, 'get', '/api/lab/status'));
+  router.get({ path: '/api/phase/lab/uploads', validate: false }, (context, request, response) => ctrl.proxy(context, request, response, 'get', '/api/lab/uploads'));
+  router.get({ path: '/api/phase/lab/samples', validate: false }, (context, request, response) => ctrl.proxy(context, request, response, 'get', '/api/lab/samples'));
+  router.post({ path: '/api/phase/lab/uploads', validate: false, options: { body: { maxBytes: 1024 * 1024 + 64 * 1024 } } }, (context, request, response) => ctrl.proxy(context, request, response, 'post', '/api/lab/uploads'));
+  router.post({ path: '/api/phase/lab/samples/{name}', validate: { params: schema.object({ name: schema.string() }) } }, (context, request, response) => ctrl.proxy(context, request, response, 'post', `/api/lab/samples/${encodeURIComponent(request.params.name)}`));
+  router.delete({ path: '/api/phase/lab/uploads/{id}', validate: { params: schema.object({ id: schema.string() }) } }, (context, request, response) => ctrl.proxy(context, request, response, 'delete', `/api/lab/uploads/${encodeURIComponent(request.params.id)}`));
   router.post(
     { path: '/api/phase/correlations/run', validate: false, options: { body: { maxBytes: 512 * 1024 } } },
     (context, request, response) => ctrl.correlate(context, request, response),
