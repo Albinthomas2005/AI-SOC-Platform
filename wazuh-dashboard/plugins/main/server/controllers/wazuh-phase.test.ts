@@ -44,7 +44,27 @@ describe('Wazuh phase proxy backend errors', () => {
       createContext(), {} as any, response as any, 'get', '/api/status',
     );
 
-    expect(result).toEqual({ statusCode, body: { ok: false, error: message } });
+    expect(result).toEqual({ statusCode, body: { ok: false, error: message, message } });
+  });
+
+  it('supplies a fallback message when a non-2xx backend response has no body', async () => {
+    needle.mockResolvedValue({ statusCode: 500, body: undefined });
+    const response = createResponse();
+
+    const result = await controller.proxy(
+      createContext(), {} as any, response as any, 'post', '/api/lab/uploads',
+      { filename: 'sample.log', content: 'synthetic', title: 'sample', platform: 'linux' },
+    );
+
+    expect(result).toEqual({
+      statusCode: 500,
+      body: { ok: false, error: 'Backend returned HTTP 500', message: 'Backend returned HTTP 500' },
+    });
+    expect(needle).toHaveBeenCalledWith(
+      'post', expect.stringContaining('/api/lab/uploads'),
+      { filename: 'sample.log', content: 'synthetic', title: 'sample', platform: 'linux' },
+      expect.any(Object),
+    );
   });
 
   it('redacts the internal token from a backend error message', async () => {
@@ -59,7 +79,8 @@ describe('Wazuh phase proxy backend errors', () => {
     );
 
     expect(result.body.error).toBe('Request failed with [redacted]');
-    expect(result.body.error).not.toContain('synthetic-internal-token');
+    expect(result.body.message).toBe('Request failed with [redacted]');
+    expect(JSON.stringify(result.body)).not.toContain('synthetic-internal-token');
   });
 
   it('returns a clear message when the backend connection fails', async () => {

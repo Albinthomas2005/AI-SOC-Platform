@@ -53,6 +53,10 @@ function backendErrorMessage(body: Record<string, any> | undefined, token: strin
     .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]');
 }
 
+function errorBody(message: string) {
+  return { ok: false, error: message, message };
+}
+
 export class WazuhPhaseCtrl {
   private async currentUsername(context: RequestHandlerContext, request: OpenSearchDashboardsRequest): Promise<string | undefined> {
     try {
@@ -71,7 +75,7 @@ export class WazuhPhaseCtrl {
     response: OpenSearchDashboardsResponseFactory,
   ) {
     const token = TOKEN();
-    if (!token) return response.custom({ statusCode: 503, body: { ok: false, error: 'SOC AI service is unavailable' } });
+    if (!token) return response.custom({ statusCode: 503, body: errorBody('SOC AI service is unavailable') });
     try {
       const upstream = await needle(method, `${BASE_URL}${path}`, body, {
         json: true,
@@ -93,12 +97,12 @@ export class WazuhPhaseCtrl {
           : 502;
         return response.custom({
           statusCode,
-          body: { ok: false, error: backendErrorMessage(upstream.body, token, upstream.statusCode) },
+          body: errorBody(backendErrorMessage(upstream.body, token, upstream.statusCode)),
         });
       }
       return response.ok({ body: upstream.body });
     } catch {
-      return response.custom({ statusCode: 503, body: { ok: false, error: 'backend unreachable' } });
+      return response.custom({ statusCode: 503, body: errorBody('backend unreachable') });
     }
   }
 
@@ -109,18 +113,18 @@ export class WazuhPhaseCtrl {
   ): Promise<{ alerts?: Array<Record<string, unknown>>; error?: any }> {
     const references = (request.body || {}).alert_refs;
     if (!Array.isArray(references) || !references.length || references.length > 50) {
-      return { error: response.custom({ statusCode: 400, body: { ok: false, error: 'Provide 1-50 alert references' } }) };
+      return { error: response.custom({ statusCode: 400, body: errorBody('Provide 1-50 alert references') }) };
     }
     let pattern: unknown;
     try {
       pattern = await context.wazuh_core.configuration.getSettingValue('pattern');
     } catch {
-      return { error: response.custom({ statusCode: 503, body: { ok: false, error: 'Alert search is unavailable' } }) };
+      return { error: response.custom({ statusCode: 503, body: errorBody('Alert search is unavailable') }) };
     }
     const alerts = [];
     for (const reference of references) {
       if (!reference || !validAlertRef(reference.index, reference.id, pattern)) {
-        return { error: response.custom({ statusCode: 400, body: { ok: false, error: 'Invalid Wazuh alert reference' } }) };
+        return { error: response.custom({ statusCode: 400, body: errorBody('Invalid Wazuh alert reference') }) };
       }
       try {
         const result = await context.core.opensearch.client.asCurrentUser.search({
@@ -140,7 +144,7 @@ export class WazuhPhaseCtrl {
         const status = (error as any)?.meta?.statusCode ?? (error as any)?.statusCode;
         return { error: response.custom({
           statusCode: status === 403 ? 403 : 503,
-          body: { ok: false, error: status === 403 ? 'Access to this alert is denied' : 'Alert search is unavailable' },
+          body: errorBody(status === 403 ? 'Access to this alert is denied' : 'Alert search is unavailable'),
         }) };
       }
     }
@@ -149,7 +153,7 @@ export class WazuhPhaseCtrl {
 
   async correlate(context: RequestHandlerContext, request: OpenSearchDashboardsRequest, response: OpenSearchDashboardsResponseFactory) {
     const username = await this.currentUsername(context, request);
-    if (!username) return response.custom({ statusCode: 401, body: { ok: false, error: 'Authentication required' } });
+    if (!username) return response.custom({ statusCode: 401, body: errorBody('Authentication required') });
     const selected = await this.selectedAlerts(context, request, response);
     if (selected.error) return selected.error;
     return this.backend('post', '/api/correlations', { alerts: selected.alerts || [] }, username, response);
@@ -157,24 +161,24 @@ export class WazuhPhaseCtrl {
 
   async lookupThreatIntel(context: RequestHandlerContext, request: OpenSearchDashboardsRequest, response: OpenSearchDashboardsResponseFactory) {
     const username = await this.currentUsername(context, request);
-    if (!username) return response.custom({ statusCode: 401, body: { ok: false, error: 'Authentication required' } });
+    if (!username) return response.custom({ statusCode: 401, body: errorBody('Authentication required') });
     const selected = await this.selectedAlerts(context, request, response);
     if (selected.error) return selected.error;
     const alert = selected.alerts?.[0];
-    if (!alert) return response.custom({ statusCode: 404, body: { ok: false, error: 'Alert is unavailable' } });
+    if (!alert) return response.custom({ statusCode: 404, body: errorBody('Alert is unavailable') });
     return this.backend('post', '/api/threat-intel/lookup', { alert }, username, response);
   }
 
   async filterLabAlerts(context: RequestHandlerContext, request: OpenSearchDashboardsRequest, response: OpenSearchDashboardsResponseFactory) {
-    if (!(await this.currentUsername(context, request))) return response.custom({ statusCode: 401, body: { ok: false, error: 'Authentication required' } });
+    if (!(await this.currentUsername(context, request))) return response.custom({ statusCode: 401, body: errorBody('Authentication required') });
     const references = (request.body || {}).alert_refs;
-    if (!Array.isArray(references) || references.length > 50) return response.custom({ statusCode: 400, body: { ok: false, error: 'Provide up to 50 alert references' } });
+    if (!Array.isArray(references) || references.length > 50) return response.custom({ statusCode: 400, body: errorBody('Provide up to 50 alert references') });
     let pattern: unknown;
     try { pattern = await context.wazuh_core.configuration.getSettingValue('pattern'); }
-    catch { return response.custom({ statusCode: 503, body: { ok: false, error: 'Alert search is unavailable' } }); }
+    catch { return response.custom({ statusCode: 503, body: errorBody('Alert search is unavailable') }); }
     const filtered = [];
     for (const reference of references) {
-      if (!reference || !validAlertRef(reference.index, reference.id, pattern)) return response.custom({ statusCode: 400, body: { ok: false, error: 'Invalid Wazuh alert reference' } });
+      if (!reference || !validAlertRef(reference.index, reference.id, pattern)) return response.custom({ statusCode: 400, body: errorBody('Invalid Wazuh alert reference') });
       try {
         const result = await context.core.opensearch.client.asCurrentUser.search({
           index: reference.index,
@@ -182,14 +186,14 @@ export class WazuhPhaseCtrl {
         });
         const hit = result?.body?.hits?.hits?.[0];
         if (typeof hit?._source?.full_log === 'string' && hit._source.full_log.includes('SOCLAB-INJECT')) filtered.push(reference);
-      } catch { return response.custom({ statusCode: 503, body: { ok: false, error: 'Alert search is unavailable' } }); }
+      } catch { return response.custom({ statusCode: 503, body: errorBody('Alert search is unavailable') }); }
     }
     return response.ok({ body: { ok: true, alert_refs: filtered, hidden_count: references.length - filtered.length } });
   }
 
   async proxy(context: RequestHandlerContext, request: OpenSearchDashboardsRequest, response: OpenSearchDashboardsResponseFactory, method: 'get' | 'post' | 'delete', path: string, body?: unknown) {
     const username = await this.currentUsername(context, request);
-    if (!username) return response.custom({ statusCode: 401, body: { ok: false, error: 'Authentication required' } });
+    if (!username) return response.custom({ statusCode: 401, body: errorBody('Authentication required') });
     let target = path;
     if (method === 'get' && request.query && Object.keys(request.query).length) {
       target += `?${new URLSearchParams(request.query as Record<string, string>).toString()}`;

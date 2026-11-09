@@ -62,12 +62,12 @@ export const LabUploads: React.FC = () => {
     <EuiCallOut color="warning" title="Lab use only. Do not upload real employer or customer data. Windows logs are not supported here: Windows alerts need a real Wazuh agent." />
     <EuiSpacer />
     <EuiPanel><EuiTitle size="s"><h2>Wazuh setup status</h2></EuiTitle>
-      {loading ? <p role="status">Loading status…</p> : status ? <><EuiText><p>Injection: {status.injection_enabled ? 'enabled' : 'disabled'} · target exists: {status.target_exists ? 'yes' : 'no'} · writable: {status.target_writable ? 'yes' : 'no'}</p><p>Wazuh read confirmed: no</p><ul>{(status.setup_needed || []).map((item: string) => <li key={item}>{item}</li>)}</ul></EuiText></> : <EuiEmptyPrompt title={<h3>Status unavailable</h3>} />}
+      {loading ? <p role="status">Loading status…</p> : status ? <><EuiText><p>Injection: {status.injection_enabled ? 'enabled' : 'disabled'} · target exists: {status.target_exists ? 'yes' : 'no'} · writable: {status.target_writable ? 'yes' : 'no'}</p><p>Wazuh read confirmed: {status.wazuh_read_confirmed ? 'yes' : 'no'} · {status.wazuh_read_reason || 'No confirmation details available'}</p><ul>{(status.setup_needed || []).map((item: string) => <li key={item}>{item}</li>)}</ul></EuiText></> : <EuiEmptyPrompt title={<h3>Status unavailable</h3>} />}
     </EuiPanel><EuiSpacer />
     <EuiPanel><EuiTitle size="s"><h2>Upload a log file</h2></EuiTitle>
       <EuiFormRow label="File (.log or .txt, up to 1 MiB and 2000 lines)"><EuiFilePicker initialPromptText="Choose a log file" accept=".log,.txt,text/plain" onChange={files => setFile(files?.[0])} /></EuiFormRow>
       <EuiFormRow label="Title"><input className="euiFieldText" value={title} maxLength={120} onChange={event => setTitle(event.target.value)} /></EuiFormRow>
-      <EuiFormRow label="Platform"><EuiSelect value={platform} options={['linux', 'syslog', 'web'].map(value => ({ value, text: value }))} onChange={event => setPlatform(event.target.value)} /></EuiFormRow>
+      <EuiFormRow label="Platform"><EuiSelect value={platform} options={['linux', 'syslog', 'web', 'windows'].map(value => ({ value, text: value }))} onChange={event => setPlatform(event.target.value)} /></EuiFormRow>
       <EuiButton isLoading={busy} isDisabled={busy || !file || !title.trim()} onClick={() => void uploadFile()}>Upload logs</EuiButton>
     </EuiPanel><EuiSpacer />
     <EuiPanel><EuiTitle size="s"><h2>Sample packs</h2></EuiTitle>{loading ? <p role="status">Loading samples…</p> : samples.length ? samples.map(sample => <EuiButton key={sample.name} isLoading={busy} isDisabled={busy} onClick={() => void loadSample(sample.name)}>{sample.title}</EuiButton>) : <EuiEmptyPrompt title={<h3>No samples available</h3>} />}</EuiPanel><EuiSpacer />

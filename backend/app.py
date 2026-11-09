@@ -71,11 +71,25 @@ SAFE_FAILURES = {
 @app.before_request
 def assign_request_id():
     g.request_id = uuid.uuid4().hex
+    if request.method == "POST" and (
+        request.path == "/api/lab/uploads" or request.path.startswith("/api/lab/samples/")
+    ):
+        g.lab_upload_id = uuid.uuid4().hex
 
 
 @app.after_request
 def add_request_id(response):
     response.headers["X-Request-ID"] = getattr(g, "request_id", uuid.uuid4().hex)
+    upload_id = getattr(g, "lab_upload_id", None)
+    if upload_id:
+        payload = response.get_json(silent=True) or {}
+        reason = payload.get("error") or ("accepted" if response.status_code < 400 else "request_rejected")
+        logger.warning(
+            "Lab upload attempt status=%s reason=%s upload_id=%s",
+            response.status_code,
+            reason,
+            upload_id,
+        )
     return response
 
 

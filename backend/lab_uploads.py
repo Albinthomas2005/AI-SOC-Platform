@@ -1,5 +1,7 @@
 """Safe append-only ingestion of lab logs into Wazuh monitored files."""
 import ipaddress
+import json
+import logging
 import os
 import re
 import stat
@@ -9,15 +11,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import closing
 
-from flask import jsonify, request
+from flask import g, jsonify, request
 
 import database
 from roles_audit import request_username
+
+logger = logging.getLogger(__name__)
 
 SAMPLES = Path(__file__).parent / "lab_samples"
 MAX_BYTES = 1024 * 1024
 MAX_LINES = 2000
 PLATFORMS = {"linux", "syslog", "web"}
+WINDOWS_PLATFORM_ERROR = "Windows event logs are unsupported as text uploads; use a Wazuh agent with EventChannel collection"
+READ_CONFIRM_WINDOW_SECONDS = 30 * 60
 _counts = {}
 _count_lock = threading.Lock()
 _ISO = re.compile(r"^\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)?")
@@ -97,6 +103,50 @@ def _append(path, rows):
         os.close(fd)
 
 
+def _wazuh_read_state(target, uploaded_at):
+    """Confirm a recent alert from the monitored file, without depending on marker parsing."""
+    alerts_path = Path(os.environ.get("WAZUH_ALERTS_FILE", "/var/ossec/logs/alerts/alerts.json"))
+    try:
+        uploaded = datetime.fromisoformat(uploaded_at.replace("Z", "+00:00"))
+        if uploaded.tzinfo is None:
+            uploaded = uploaded.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        if (now - uploaded).total_seconds() > READ_CONFIRM_WINDOW_SECONDS:
+            return False, "Upload is older than the 30-minute confirmation window"
+        with alerts_path.open("rb") as alerts_file:
+            alerts_file.seek(0, os.SEEK_END)
+            size = alerts_file.tell()
+            alerts_file.seek(max(0, size - 4 * 1024 * 1024))
+            content = alerts_file.read().decode("utf-8", errors="replace")
+        lines = content.splitlines()
+        if size > 4 * 1024 * 1024 and lines:
+            lines = lines[1:]
+        target_path = str(Path(target).resolve())
+        for line in reversed(lines):
+            try:
+                alert = json.loads(line)
+                location = alert.get("location")
+                timestamp = alert.get("timestamp")
+                if not isinstance(location, str) or not isinstance(timestamp, str):
+                    continue
+                if str(Path(location).resolve()) != target_path:
+                    continue
+                observed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                if observed.tzinfo is None:
+                    observed = observed.replace(tzinfo=timezone.utc)
+                if uploaded <= observed <= now:
+                    return True, "A recent alert from the monitored upload file was found"
+            except (ValueError, TypeError, OSError):
+                continue
+        return False, "No alert from the monitored upload file was found after the latest upload"
+    except PermissionError:
+        return False, "Backend cannot read Wazuh alerts.json; grant the backend read permission"
+    except FileNotFoundError:
+        return False, "Wazuh alerts.json was not found; configure WAZUH_ALERTS_FILE"
+    except (OSError, ValueError):
+        return False, "Wazuh alerts.json could not be checked"
+
+
 def register_lab_routes(app):
     @app.before_request
     def allow_multipart_overhead_for_lab_file():
@@ -116,13 +166,14 @@ def register_lab_routes(app):
             _counts[user] = points
             return True
 
-    def save_upload(raw, title, platform, user):
+    def save_upload(raw, title, platform, user, upload_id):
         if not enabled():
             return None, (jsonify(ok=False, error="Lab injection is disabled"), 403)
         if not isinstance(title, str) or not title.strip() or len(title.strip()) > 120:
             return None, (jsonify(ok=False, error="A title of 1-120 characters is required"), 400)
         if platform not in PLATFORMS:
-            return None, (jsonify(ok=False, error="platform must be linux, syslog, or web"), 400)
+            message = WINDOWS_PLATFORM_ERROR if platform == "windows" else "platform must be linux, syslog, or web"
+            return None, (jsonify(ok=False, error=message, message=message), 400)
         try:
             rows = _clean_content(raw)
             path = _target()
@@ -130,9 +181,8 @@ def register_lab_routes(app):
             return None, (jsonify(ok=False, error=str(error)), 400)
         if not rate_check(user):
             return None, (jsonify(ok=False, error="Lab upload rate limit exceeded"), 429)
-        upload_id = uuid.uuid4().hex
         try:
-            _append(path, [f"{line} SOCLAB-INJECT upload={upload_id}" for line in rows])
+            _append(path, [f"# SOCLAB-INJECT upload={upload_id}", *rows])
         except OSError:
             return None, (jsonify(ok=False, error="Target file could not be appended"), 400)
         uploaded_at = _now()
@@ -154,9 +204,11 @@ def register_lab_routes(app):
             exists = writable = False
         with closing(database.get_connection()) as connection:
             count = connection.execute("SELECT COUNT(*) FROM lab_uploads").fetchone()[0]
+            latest = connection.execute("SELECT uploaded_at FROM lab_uploads ORDER BY uploaded_at DESC LIMIT 1").fetchone()
+        confirmed, confirmation_reason = _wazuh_read_state(path if exists else os.environ.get("SOC_AI_INJECT_PATH", ""), latest["uploaded_at"] if latest else "") if latest else (False, "Upload a log before checking for Wazuh alerts")
         return jsonify(ok=True, injection_enabled=enabled(), target_exists=exists, target_writable=writable,
                        uploads_exist=count > 0, setup_needed=["Add the <localfile> entry shown in docs/LAB_SETUP.md to ossec.conf", "Restart wazuh-manager after adding the entry"],
-                       wazuh_read_confirmed=False)
+                       wazuh_read_confirmed=confirmed, wazuh_read_reason=confirmation_reason)
 
     @app.get("/api/lab/uploads")
     def list_lab_uploads():
@@ -185,34 +237,44 @@ def register_lab_routes(app):
 
     @app.post("/api/lab/uploads")
     def create_lab_upload():
+        upload_id = getattr(g, "lab_upload_id", uuid.uuid4().hex)
         user = request_username()
-        upload = request.files.get("file")
-        if upload is not None:
-            filename, raw = upload.filename, upload.read(MAX_BYTES + 1)
-            title, platform = request.form.get("title"), request.form.get("platform")
-        else:
-            payload = request.get_json(silent=True) if request.is_json else None
-            if not isinstance(payload, dict):
-                return jsonify(ok=False, error="Choose a .log or .txt file"), 400
-            filename, content = payload.get("filename"), payload.get("content")
-            if not isinstance(content, str):
-                return jsonify(ok=False, error="File content must be text"), 400
-            raw = content.encode("utf-8")
-            title, platform = payload.get("title"), payload.get("platform")
-        if not isinstance(filename, str) or not filename.lower().endswith((".log", ".txt")):
-            return jsonify(ok=False, error="Choose a .log or .txt file"), 400
-        result, error = save_upload(raw, title, platform, user)
-        if error:
-            return error
-        return jsonify(ok=True, upload=result), 201
+        try:
+            upload = request.files.get("file")
+            if upload is not None:
+                filename, raw = upload.filename, upload.read(MAX_BYTES + 1)
+                title, platform = request.form.get("title"), request.form.get("platform")
+            else:
+                payload = request.get_json(silent=True) if request.is_json else None
+                if not isinstance(payload, dict):
+                    return jsonify(ok=False, error="Choose a .log or .txt file", message="Choose a .log or .txt file"), 400
+                filename, content = payload.get("filename"), payload.get("content")
+                if not isinstance(content, str):
+                    return jsonify(ok=False, error="File content must be text", message="File content must be text"), 400
+                raw = content.encode("utf-8")
+                title, platform = payload.get("title"), payload.get("platform")
+            if not isinstance(filename, str) or not filename.lower().endswith((".log", ".txt")):
+                return jsonify(ok=False, error="Choose a .log or .txt file", message="Choose a .log or .txt file"), 400
+            result, error = save_upload(raw, title, platform, user, upload_id)
+            if error:
+                return error
+            return jsonify(ok=True, upload=result), 201
+        except Exception:
+            logger.exception("Lab upload failed status=500 reason=metadata_or_route_error upload_id=%s", upload_id)
+            return jsonify(ok=False, error="Lab upload could not be completed", message="Lab upload could not be completed"), 500
 
     @app.post("/api/lab/samples/<name>")
     def load_lab_sample(name):
+        upload_id = getattr(g, "lab_upload_id", uuid.uuid4().hex)
         if name not in {"ssh_bruteforce.log", "sudo_escalation.log", "web_scan.log"}:
-            return jsonify(ok=False, error="Sample not found"), 404
-        path = SAMPLES / name
-        platform = "web" if name == "web_scan.log" else "linux"
-        result, error = save_upload(path.read_bytes(), name.removesuffix(".log").replace("_", " ").title(), platform, request_username())
-        if error:
-            return error
-        return jsonify(ok=True, upload=result), 201
+            return jsonify(ok=False, error="Sample not found", message="Sample not found"), 404
+        try:
+            path = SAMPLES / name
+            platform = "web" if name == "web_scan.log" else "linux"
+            result, error = save_upload(path.read_bytes(), name.removesuffix(".log").replace("_", " ").title(), platform, request_username(), upload_id)
+            if error:
+                return error
+            return jsonify(ok=True, upload=result), 201
+        except Exception:
+            logger.exception("Lab sample upload failed status=500 reason=sample_or_metadata_error upload_id=%s", upload_id)
+            return jsonify(ok=False, error="Sample upload could not be completed", message="Sample upload could not be completed"), 500

@@ -1,4 +1,6 @@
 import io
+import json
+import logging
 import os
 import tempfile
 import unittest
@@ -16,12 +18,14 @@ class LabUploadTests(unittest.TestCase):
         root = Path(self.temp.name)
         self.db_path = root / "platform-test.db"
         self.target = root / "wazuh-input.log"
+        self.alerts = root / "alerts.json"
         self.env = patch.dict(os.environ, {
             "SOC_AI_DB_PATH": str(self.db_path),
             "SOC_AI_INTERNAL_TOKEN": "lab-test-token",
             "SOC_AI_INJECT_ENABLED": "true",
             "SOC_AI_INJECT_PATH": str(self.target),
             "SOC_AI_INJECT_ALLOWED_DIR": str(root),
+            "WAZUH_ALERTS_FILE": str(self.alerts),
         }, clear=False)
         self.env.start()
         database.init_db()
@@ -52,14 +56,60 @@ class LabUploadTests(unittest.TestCase):
     def test_timestamp_suffix_append_and_metadata(self):
         response = self.upload()
         self.assertEqual(response.status_code, 201, response.get_json())
-        first = self.target.read_text()
-        self.assertIn("SOCLAB-INJECT upload=", first)
-        self.assertNotIn("Jan  1 00:00:00", first)
-        self.assertRegex(first, r"^[A-Z][a-z]{2} \d{2} \d{2}:\d{2}:\d{2} host")
+        first = self.target.read_text().splitlines()
+        self.assertRegex(first[0], r"^# SOCLAB-INJECT upload=[0-9a-f]{32}$")
+        self.assertNotIn("SOCLAB-INJECT", first[1])
+        self.assertNotIn("Jan  1 00:00:00", first[1])
+        self.assertRegex(first[1], r"^[A-Z][a-z]{2} \d{2} \d{2}:\d{2}:\d{2} host")
         self.upload()
-        self.assertEqual(len(self.target.read_text().splitlines()), 2)
+        self.assertEqual(len(self.target.read_text().splitlines()), 4)
         rows = self.client.get("/api/lab/uploads", headers=self.headers()).get_json()["uploads"]
         self.assertEqual(len(rows), 2)
+
+    def test_valid_ssh_sample_json_upload_succeeds(self):
+        content = (Path(__file__).parents[1] / "lab_samples" / "ssh_bruteforce.log").read_text()
+        response = self.client.post("/api/lab/uploads", headers=self.headers(), json={
+            "filename": "ssh_bruteforce.log", "content": content,
+            "title": "SSH sample", "platform": "linux",
+        })
+        self.assertEqual(response.status_code, 201, response.get_json())
+
+    def test_windows_upload_returns_specific_unsupported_reason(self):
+        response = self.client.post("/api/lab/uploads", headers=self.headers(), json={
+            "filename": "windows.log", "content": "2026-11-09T10:00:00Z host EventID=4625",
+            "title": "Windows sample", "platform": "windows",
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"], lab_uploads.WINDOWS_PLATFORM_ERROR)
+        self.assertEqual(response.get_json()["message"], lab_uploads.WINDOWS_PLATFORM_ERROR)
+
+    def test_read_confirmation_matches_recent_alert_location_and_upload_time(self):
+        self.assertEqual(self.upload().status_code, 201)
+        upload = self.client.get("/api/lab/uploads", headers=self.headers()).get_json()["uploads"][0]
+        before_alert = self.client.get("/api/lab/status", headers=self.headers()).get_json()
+        self.assertFalse(before_alert["wazuh_read_confirmed"])
+        self.alerts.write_text(json.dumps({
+            "timestamp": upload["uploaded_at"],
+            "location": str(self.target),
+            "full_log": "sshd: Failed password",
+        }) + "\n")
+        status = self.client.get("/api/lab/status", headers=self.headers()).get_json()
+        self.assertTrue(status["wazuh_read_confirmed"], status["wazuh_read_reason"])
+
+    def test_upload_attempt_log_has_status_reason_and_id_without_content(self):
+        secret_content = "synthetic-private-log-content"
+        with self.assertLogs(logging.getLogger("app"), level="WARNING") as captured:
+            response = self.client.post("/api/lab/uploads", headers=self.headers(), json={
+                "filename": "windows.log", "content": secret_content,
+                "title": "Windows sample", "platform": "windows",
+            })
+        self.assertEqual(response.status_code, 400)
+        log_line = " ".join(captured.output)
+        self.assertIn("status=400", log_line)
+        self.assertIn("reason=Windows event logs are unsupported", log_line)
+        self.assertRegex(log_line, r"upload_id=[0-9a-f]{32}")
+        self.assertNotIn(secret_content, log_line)
+        self.assertNotIn("lab-test-token", log_line)
 
     def test_rejects_binary_null_public_ip_and_limits(self):
         for value in (b"abc\x00def\n", b"\xff\xfe", b"GET / from 8.8.8.8\n"):
