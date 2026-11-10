@@ -45,6 +45,7 @@ def _clean_content(raw):
     lines = text.splitlines()
     if not lines or len(lines) > MAX_LINES or any(not line for line in lines):
         raise ValueError("File must contain 1-2000 non-empty lines")
+    replacements = {}
     for match in _IP.finditer(text):
         try:
             addr = ipaddress.ip_address(match.group(0))
@@ -53,7 +54,12 @@ def _clean_content(raw):
         allowed_doc = any(addr in ipaddress.ip_network(net) for net in (
             "192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24"))
         if addr.is_global and not allowed_doc:
-            raise ValueError("Public IP addresses are not allowed")
+            # Keep the event shape useful for decoder/rule testing while ensuring
+            # public infrastructure addresses never reach the monitored log.
+            replacements[match.group(0)] = "198.51.100.10" if addr.version == 4 else "2001:db8::10"
+    for original, replacement in replacements.items():
+        text = text.replace(original, replacement)
+    lines = text.splitlines()
     now = datetime.now(timezone.utc)
     rewritten = []
     for line in lines:
@@ -100,15 +106,21 @@ def _append(path, rows):
         os.close(fd)
 
 
-def _wazuh_read_state(target, uploaded_at):
+def _wazuh_read_state(target, uploaded_at_values):
     """Confirm a recent alert from the monitored file, without depending on marker parsing."""
     alerts_path = Path(os.environ.get("WAZUH_ALERTS_FILE", "/var/ossec/logs/alerts/alerts.json"))
     try:
-        uploaded = datetime.fromisoformat(uploaded_at.replace("Z", "+00:00"))
-        if uploaded.tzinfo is None:
-            uploaded = uploaded.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
-        if (now - uploaded).total_seconds() > READ_CONFIRM_WINDOW_SECONDS:
+        if isinstance(uploaded_at_values, str):
+            uploaded_at_values = [uploaded_at_values]
+        uploads = []
+        for uploaded_at in uploaded_at_values:
+            uploaded = datetime.fromisoformat(uploaded_at.replace("Z", "+00:00"))
+            if uploaded.tzinfo is None:
+                uploaded = uploaded.replace(tzinfo=timezone.utc)
+            if 0 <= (now - uploaded).total_seconds() <= READ_CONFIRM_WINDOW_SECONDS:
+                uploads.append(uploaded)
+        if not uploads:
             return False, "Upload is older than the 30-minute confirmation window"
         with alerts_path.open("rb") as alerts_file:
             alerts_file.seek(0, os.SEEK_END)
@@ -131,11 +143,11 @@ def _wazuh_read_state(target, uploaded_at):
                 observed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
                 if observed.tzinfo is None:
                     observed = observed.replace(tzinfo=timezone.utc)
-                if uploaded <= observed <= now:
+                if any(uploaded <= observed <= now for uploaded in uploads):
                     return True, "A recent alert from the monitored upload file was found"
             except (ValueError, TypeError, OSError):
                 continue
-        return False, "No alert from the monitored upload file was found after the latest upload"
+        return False, "No alert from the monitored upload file was found after a recent upload"
     except PermissionError:
         return False, "Backend cannot read Wazuh alerts.json; grant the backend read permission"
     except FileNotFoundError:
@@ -202,8 +214,11 @@ def register_lab_routes(app):
             exists = writable = False
         with closing(database.get_connection()) as connection:
             count = connection.execute("SELECT COUNT(*) FROM lab_uploads").fetchone()[0]
-            latest = connection.execute("SELECT uploaded_at FROM lab_uploads ORDER BY uploaded_at DESC LIMIT 1").fetchone()
-        confirmed, confirmation_reason = _wazuh_read_state(path if exists else os.environ.get("SOC_AI_INJECT_PATH", ""), latest["uploaded_at"] if latest else "") if latest else (False, "Upload a log before checking for Wazuh alerts")
+            recent_uploads = connection.execute("SELECT uploaded_at FROM lab_uploads ORDER BY uploaded_at DESC").fetchall()
+        confirmed, confirmation_reason = _wazuh_read_state(
+            path if exists else os.environ.get("SOC_AI_INJECT_PATH", ""),
+            [row["uploaded_at"] for row in recent_uploads],
+        ) if recent_uploads else (False, "Upload a log before checking for Wazuh alerts")
         return jsonify(ok=True, injection_enabled=enabled(), target_exists=exists, target_writable=writable,
                        uploads_exist=count > 0, setup_needed=["Add the <localfile> entry shown in docs/LAB_SETUP.md to ossec.conf", "Restart wazuh-manager after adding the entry"],
                        wazuh_read_confirmed=confirmed, wazuh_read_reason=confirmation_reason)
@@ -215,7 +230,14 @@ def register_lab_routes(app):
         query = "SELECT * FROM lab_uploads" + ("" if is_admin else " WHERE username = ?") + " ORDER BY uploaded_at DESC"
         with closing(database.get_connection()) as connection:
             rows = connection.execute(query, () if is_admin else (user,)).fetchall()
-        return jsonify(ok=True, uploads=[dict(row) for row in rows])
+        uploads = []
+        for row in rows:
+            upload = dict(row)
+            # Keep the API's public identifier consistent with upload responses
+            # and the dashboard's delete action.
+            upload["id"] = upload["upload_id"]
+            uploads.append(upload)
+        return jsonify(ok=True, uploads=uploads)
 
     @app.delete("/api/lab/uploads/<upload_id>")
     def delete_lab_upload(upload_id):

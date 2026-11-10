@@ -11,6 +11,7 @@ const originalInternalToken = process.env.SOC_AI_INTERNAL_TOKEN;
 const originalBaseUrl = process.env.SOC_AI_BASE_URL;
 const originalHost = process.env.SOC_AI_HOST;
 const originalPort = process.env.SOC_AI_PORT;
+const originalUsernameMap = process.env.SOC_AI_USERNAME_MAP;
 
 const createContext = () => ({
   wazuh: {
@@ -29,6 +30,7 @@ describe('Wazuh phase proxy backend errors', () => {
     jest.clearAllMocks();
     process.env.SOC_AI_INTERNAL_TOKEN = 'synthetic-internal-token';
     process.env.SOC_AI_BASE_URL = 'http://127.0.0.1:5000';
+    delete process.env.SOC_AI_USERNAME_MAP;
   });
 
   afterAll(() => {
@@ -43,6 +45,8 @@ describe('Wazuh phase proxy backend errors', () => {
     else process.env.SOC_AI_HOST = originalHost;
     if (originalPort === undefined) delete process.env.SOC_AI_PORT;
     else process.env.SOC_AI_PORT = originalPort;
+    if (originalUsernameMap === undefined) delete process.env.SOC_AI_USERNAME_MAP;
+    else process.env.SOC_AI_USERNAME_MAP = originalUsernameMap;
   });
 
   it.each([
@@ -58,6 +62,17 @@ describe('Wazuh phase proxy backend errors', () => {
     );
 
     expect(result).toEqual({ statusCode, body: { ok: false, error: message, message } });
+  });
+
+  it('maps the authenticated Dashboard username to the configured SOC database identity', async () => {
+    process.env.SOC_AI_USERNAME_MAP = '{"analyst":"soc-l2-analyst"}';
+    needle.mockResolvedValue({ statusCode: 200, body: { ok: true } });
+    await controller.proxy(createContext(), {} as any, createResponse() as any, 'get', '/api/incidents');
+
+    expect(needle).toHaveBeenCalledWith(
+      'get', expect.stringContaining('/api/incidents'), {},
+      expect.objectContaining({ headers: expect.objectContaining({ 'X-SOC-User': 'soc-l2-analyst' }) }),
+    );
   });
 
   it('supplies a fallback message when a non-2xx backend response has no body', async () => {
@@ -77,6 +92,29 @@ describe('Wazuh phase proxy backend errors', () => {
       'post', expect.stringContaining('/api/lab/uploads'),
       { filename: 'sample.log', content: 'synthetic', title: 'sample', platform: 'linux' },
       expect.any(Object),
+    );
+  });
+
+  it('forwards multipart uploads with their original boundary and signed-in identity', async () => {
+    const multipart = Buffer.from('--sample-boundary\r\nContent-Disposition: form-data; name="title"\r\n\r\nSynthetic upload\r\n--sample-boundary--\r\n');
+    needle.mockResolvedValue({ statusCode: 201, body: { ok: true, upload: { id: 'synthetic-id' } } });
+    const result = await controller.uploadLab(
+      createContext(),
+      { body: multipart, headers: { 'content-type': 'multipart/form-data; boundary=sample-boundary' } } as any,
+      createResponse() as any,
+    );
+
+    expect(result.statusCode).toBe(201);
+    expect(needle).toHaveBeenCalledWith(
+      'post', expect.stringContaining('/api/lab/uploads'), multipart,
+      expect.objectContaining({
+        json: false,
+        headers: expect.objectContaining({
+          Authorization: 'Bearer synthetic-internal-token',
+          'X-SOC-User': 'analyst',
+          'Content-Type': 'multipart/form-data; boundary=sample-boundary',
+        }),
+      }),
     );
   });
 

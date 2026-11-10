@@ -1,9 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { EuiButton, EuiCallOut, EuiEmptyPrompt, EuiFilePicker, EuiFormRow, EuiPanel, EuiSelect, EuiSpacer, EuiText, EuiTitle } from '@elastic/eui';
 import { WzRequest } from '../../react-services/wz-request';
 
-type Upload = { id: string; title: string; platform: string; line_count: number; uploaded_at: string };
+type Upload = { id?: string; upload_id?: string; title: string; platform: string; line_count: number; uploaded_at: string };
 const request = async (method: string, path: string, body?: unknown) => (await WzRequest.genericReq(method, path, body, { shouldRetry: false, checkCurrentApiIsUp: false }) as any)?.data;
+const errorMessage = (error: any, fallback: string) => {
+  const data = error?.response?.data || error?.data;
+  const candidate = [data?.error, data?.message, error?.message].find(
+    value => typeof value === 'string' && value.trim() && value !== 'Bad Request',
+  );
+  return candidate || fallback;
+};
 
 export const LabUploads: React.FC = () => {
   const [file, setFile] = useState<File>();
@@ -15,6 +22,7 @@ export const LabUploads: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const uploadInFlight = useRef(false);
 
   const refresh = async () => {
     setLoading(true); setError('');
@@ -23,37 +31,47 @@ export const LabUploads: React.FC = () => {
         request('GET', '/api/phase/lab/status'), request('GET', '/api/phase/lab/uploads'), request('GET', '/api/phase/lab/samples'),
       ]);
       setStatus(s); setUploads(u.uploads || []); setSamples(p.samples || []);
-    } catch (e: any) { setError(e?.response?.data?.error || e?.message || 'Could not load lab upload data'); }
+    } catch (e: any) { setError(errorMessage(e, 'Could not load lab upload data')); }
     finally { setLoading(false); }
   };
   useEffect(() => { void refresh(); }, []);
 
-  const submit = async (name: string, content: string, selectedTitle: string, selectedPlatform: string) => {
+  const uploadFile = async () => {
+    if (busy || uploadInFlight.current) return;
+    if (!file) { setError('Choose a .log or .txt file'); return; }
+    uploadInFlight.current = true;
     setBusy(true); setError('');
     try {
-      await request('POST', '/api/phase/lab/uploads', { filename: name, content, title: selectedTitle, platform: selectedPlatform });
+      const bytes = await file.arrayBuffer();
+      try {
+        new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      } catch {
+        setError('File must be valid UTF-8 text');
+        return;
+      }
+      const form = new FormData();
+      form.append('file', file, file.name);
+      form.append('title', title);
+      form.append('platform', platform);
+      await request('POST', '/api/phase/lab/uploads', form);
       await refresh();
-    } catch (e: any) { setError(e?.response?.data?.error || e?.message || 'Upload failed'); }
-    finally { setBusy(false); }
-  };
-  const uploadFile = async () => {
-    if (!file) { setError('Choose a .log or .txt file'); return; }
-    try {
-      const content = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
-      await submit(file.name, content, title, platform);
-    } catch { setError('File must be valid UTF-8 text'); }
+    } catch (e: any) {
+      setError(errorMessage(e, e instanceof TypeError ? 'File must be valid UTF-8 text' : 'Upload failed'));
+    } finally { uploadInFlight.current = false; setBusy(false); }
   };
   const loadSample = async (name: string) => {
     setBusy(true); setError('');
     try { await request('POST', `/api/phase/lab/samples/${encodeURIComponent(name)}`); await refresh(); }
-    catch (e: any) { setError(e?.response?.data?.error || e?.message || 'Sample upload failed'); }
+    catch (e: any) { setError(errorMessage(e, 'Sample upload failed')); }
     finally { setBusy(false); }
   };
   const remove = async (upload: Upload) => {
+    const uploadId = upload.id || upload.upload_id;
+    if (!uploadId) { setError('This upload record has no identifier. Refresh the page and try again.'); return; }
     if (!window.confirm('Delete this platform upload record? Alerts already created in Wazuh cannot be removed by this tool.')) return;
     setBusy(true); setError('');
-    try { await request('DELETE', `/api/phase/lab/uploads/${encodeURIComponent(upload.id)}`); await refresh(); }
-    catch (e: any) { setError(e?.response?.data?.error || e?.message || 'Delete failed'); }
+    try { await request('DELETE', `/api/phase/lab/uploads/${encodeURIComponent(uploadId)}`); await refresh(); }
+    catch (e: any) { setError(errorMessage(e, 'Delete failed')); }
     finally { setBusy(false); }
   };
 
@@ -71,7 +89,7 @@ export const LabUploads: React.FC = () => {
       <EuiButton isLoading={busy} isDisabled={busy || !file || !title.trim()} onClick={() => void uploadFile()}>Upload logs</EuiButton>
     </EuiPanel><EuiSpacer />
     <EuiPanel><EuiTitle size="s"><h2>Sample packs</h2></EuiTitle>{loading ? <p role="status">Loading samples…</p> : samples.length ? samples.map(sample => <EuiButton key={sample.name} isLoading={busy} isDisabled={busy} onClick={() => void loadSample(sample.name)}>{sample.title}</EuiButton>) : <EuiEmptyPrompt title={<h3>No samples available</h3>} />}</EuiPanel><EuiSpacer />
-    <EuiPanel><EuiTitle size="s"><h2>Your uploads</h2></EuiTitle>{loading ? <p role="status">Loading uploads…</p> : uploads.length ? uploads.map(upload => <div key={upload.id}><EuiText><p>{upload.title} · {upload.platform} · {upload.line_count} lines · {new Date(upload.uploaded_at).toLocaleString()}</p></EuiText><EuiButton color="danger" size="s" isDisabled={busy} onClick={() => void remove(upload)}>Delete record</EuiButton><EuiSpacer size="s" /></div>) : <EuiEmptyPrompt title={<h3>No uploads yet</h3>} body={<p>Upload a lab log or load a sample pack.</p>} />}</EuiPanel>
+    <EuiPanel><EuiTitle size="s"><h2>Your uploads</h2></EuiTitle>{loading ? <p role="status">Loading uploads…</p> : uploads.length ? uploads.map(upload => { const uploadId = upload.id || upload.upload_id; return <div key={uploadId || `${upload.title}-${upload.uploaded_at}`}><EuiText><p>{upload.title} · {upload.platform} · {upload.line_count} lines · {new Date(upload.uploaded_at).toLocaleString()}</p></EuiText><EuiButton color="danger" size="s" isDisabled={busy || !uploadId} onClick={() => void remove(upload)}>Delete record</EuiButton><EuiSpacer size="s" /></div>; }) : <EuiEmptyPrompt title={<h3>No uploads yet</h3>} body={<p>Upload a lab log or load a sample pack.</p>} />}</EuiPanel>
     {error && <><EuiSpacer /><EuiCallOut color="danger" title={error} /></>}
   </div>;
 };

@@ -45,6 +45,18 @@ describe('PhaseWorkbench', () => {
     expect(await screen.findByText('No results were returned.')).toBeInTheDocument();
   });
 
+  it('sends assistant evidence using the backend evidence contract', async () => {
+    render(<PhaseWorkbench />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Assistant' }));
+    fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'Explain this alert' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask assistant' }));
+    await waitFor(() => expect(WzRequest.genericReq).toHaveBeenCalledWith(
+      'POST', '/api/phase/assistant/chat',
+      { question: 'Explain this alert', evidence: [{ type: 'alert', id: 'replace-with-alert-id' }] },
+      { shouldRetry: false, checkCurrentApiIsUp: false },
+    ));
+  });
+
   it.each([
     ['Correlation', 'Build correlation timeline'],
     ['Incidents', 'Refresh incidents'],

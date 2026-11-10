@@ -12,7 +12,7 @@ export function WazuhPhaseRoutes(router: IRouter) {
     {
       path: '/api/phase/lab/uploads',
       validate: false,
-      options: { body: { maxBytes: 10 * 1024 * 1024, parse: false, output: 'data' } },
+      options: { body: { maxBytes: 1024 * 1024 + 64 * 1024, parse: false, output: 'data' } },
     },
     (context, request, response) => ctrl.uploadLab(context, request, response),
   );

@@ -7,6 +7,7 @@ jest.mock('needle', () => jest.fn());
 const needle = require('needle') as jest.Mock;
 const controller = new WazuhHuntingCtrl();
 const originalToken = process.env.SOC_AI_INTERNAL_TOKEN;
+const originalBaseUrl = process.env.SOC_AI_BASE_URL;
 const query = {
   index: 'wazuh-alerts-4.x-*',
   size: 10,
@@ -38,6 +39,7 @@ describe('POST /api/hunts/run executes only validated proposals as current user'
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.SOC_AI_INTERNAL_TOKEN = 'synthetic-hunt-token';
+    process.env.SOC_AI_BASE_URL = 'http://127.0.0.1:5000';
     needle
       .mockResolvedValueOnce({ statusCode: 201, body: { ok: true, hunt_id: 'a'.repeat(32), proposal } })
       .mockResolvedValueOnce({ statusCode: 200, body: { ok: true, interpretation: 'Cites alert-1', result_count: 1 } });
@@ -46,6 +48,8 @@ describe('POST /api/hunts/run executes only validated proposals as current user'
   afterAll(() => {
     if (originalToken === undefined) delete process.env.SOC_AI_INTERNAL_TOKEN;
     else process.env.SOC_AI_INTERNAL_TOKEN = originalToken;
+    if (originalBaseUrl === undefined) delete process.env.SOC_AI_BASE_URL;
+    else process.env.SOC_AI_BASE_URL = originalBaseUrl;
   });
 
   it('proposes, searches as the signed-in user, and saves the resulting report', async () => {

@@ -4,9 +4,10 @@ import {
   OpenSearchDashboardsResponseFactory,
 } from 'src/core/server';
 import { WAZUH_ALERTS_PREFIX } from '../../common/constants';
+import { socAiUsername } from '../lib/soc-ai-identity';
 
 type NeedleOptions = {
-  json: boolean;
+  json?: boolean;
   headers: Record<string, string>;
   open_timeout: number;
   response_timeout: number;
@@ -91,7 +92,7 @@ export class WazuhPhaseCtrl {
   private async currentUsername(context: RequestHandlerContext, request: OpenSearchDashboardsRequest): Promise<string | undefined> {
     try {
       const user = await context.wazuh.security.getCurrentUser(request, context);
-      return typeof user?.username === 'string' ? user.username : undefined;
+      return typeof user?.username === 'string' ? socAiUsername(user.username) : undefined;
     } catch {
       return undefined;
     }
@@ -104,6 +105,7 @@ export class WazuhPhaseCtrl {
     username: string,
     response: OpenSearchDashboardsResponseFactory,
     diagnostic?: UploadDiagnostic,
+    requestOptions: { json?: boolean; headers?: Record<string, string> } = {},
   ) {
     const token = process.env.SOC_AI_INTERNAL_TOKEN?.trim();
     if (!token) {
@@ -117,8 +119,12 @@ export class WazuhPhaseCtrl {
     }
     try {
       const upstream = await needle(method, `${baseUrl}${path}`, body, {
-        json: true,
-        headers: { Authorization: `Bearer ${token}`, 'X-SOC-User': username },
+        json: requestOptions.json !== false,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-SOC-User': username,
+          ...(requestOptions.headers || {}),
+        },
         // eslint-disable-next-line camelcase
         open_timeout: TIMEOUT_MS,
         // eslint-disable-next-line camelcase
@@ -168,6 +174,28 @@ export class WazuhPhaseCtrl {
         diagnostic.log('auth', 'signed_in_user_unavailable');
         return customResponse(response, 401, errorBody('Authentication required'), diagnostic);
       }
+      const contentType = String(request.headers?.['content-type'] || request.headers?.['Content-Type'] || '');
+      if (contentType.toLowerCase().startsWith('multipart/form-data')) {
+        const body = request.body;
+        const boundary = /\bboundary=(?:"([^"]+)"|([^;\s]+))/i.exec(contentType);
+        if (!boundary) {
+          diagnostic.log('request_parse', 'multipart_boundary_missing');
+          return customResponse(response, 400, errorBody('Multipart upload boundary is missing'), diagnostic);
+        }
+        if (!Buffer.isBuffer(body)) {
+          diagnostic.log('request_parse', 'multipart_body_unavailable');
+          return customResponse(response, 400, errorBody('Multipart upload body is unavailable'), diagnostic);
+        }
+        if (body.byteLength > UPLOAD_REQUEST_MAX_BYTES) {
+          diagnostic.log('request_parse', 'payload_too_large');
+          return customResponse(response, 413, errorBody('Upload request exceeds the 1 MiB file limit'), diagnostic);
+        }
+        return await this.backend('post', '/api/lab/uploads', body, username, response, diagnostic, {
+          json: false,
+          headers: { 'Content-Type': contentType },
+        });
+      }
+
       let payload: unknown = request.body;
       if (Buffer.isBuffer(payload)) {
         if (payload.byteLength > UPLOAD_REQUEST_MAX_BYTES) {
@@ -191,6 +219,10 @@ export class WazuhPhaseCtrl {
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
         diagnostic.log('request_parse', 'json_object_required');
         return customResponse(response, 400, errorBody('Upload request must be a JSON object'), diagnostic);
+      }
+      if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > UPLOAD_REQUEST_MAX_BYTES) {
+        diagnostic.log('request_parse', 'payload_too_large');
+        return customResponse(response, 413, errorBody('Upload request exceeds the 1 MiB file limit'), diagnostic);
       }
       return await this.backend('post', '/api/lab/uploads', payload, username, response, diagnostic);
     } catch {

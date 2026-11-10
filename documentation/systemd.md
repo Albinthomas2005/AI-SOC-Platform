@@ -38,7 +38,16 @@ match `SOC_AI_INTERNAL_TOKEN` in the backend environment.
 # /etc/wazuh-dashboard/soc-ai.env (example placeholder only)
 SOC_AI_BASE_URL=http://127.0.0.1:5000
 SOC_AI_INTERNAL_TOKEN=replace-with-the-same-local-token
+# Optional: map authenticated Dashboard usernames to existing SOC database usernames.
+SOC_AI_USERNAME_MAP='{"wazuh-analyst":"soc-analyst"}'
 ```
+
+The mapping is read only from the protected Dashboard server environment. The
+backend continues to look up each mapped username's role in its own `soc_users`
+table and enforce the existing route-role checks; the proxy never accepts a
+client-supplied role. Leave the mapping unset when Dashboard and SOC usernames
+already match. Assign the mapped SOC account its required L1, L2, L3, or admin
+role through the backend's admin route before using protected workbench routes.
 
 The dashboard systemd drop-in can reference the protected environment file:
 

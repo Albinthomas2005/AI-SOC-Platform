@@ -83,13 +83,17 @@ run_case() {
   local name="$1" installer_name="$2" readable="$3" expected_status="$4"
   local case_root="$TEST_ROOT/$name" dashboard="$TEST_ROOT/$name/dashboard"
   local output status installer="$dashboard/bin/$installer_name"
+  local expected_privilege=sudo
+  (( EUID == 0 )) && expected_privilege=root
   mkdir -p "$dashboard/bin" "$dashboard/plugins/wazuh"
   cat > "$dashboard/package.json" <<'JSON'
 {"name":"opensearch-dashboards","version":"2.19.6"}
 JSON
   if [[ "$installer_name" != "-" ]]; then
     printf '#!/bin/sh\nexit 0\n' > "$installer"
-    chmod 750 "$installer"
+    # The normal caller cannot execute this file. The sudo test shim models
+    # the Dashboard service owner being able to execute it.
+    chmod 000 "$installer"
   else
     installer=""
   fi
@@ -129,17 +133,16 @@ JSON
       fail "$name did not report missing installer"
     }
   fi
-  if [[ "$readable" == "no" ]]; then
-    [[ "$output" == *'directory inaccessible; privileged checks only'* && "$output" == *'command: sudo test -x'* ]] || {
-      printf '%s\n' "$output" >&2
-      fail "$name did not use privileged checks for an inaccessible bin directory"
-    }
-  fi
+  [[ "$output" == *"command: $expected_privilege test -x"* ]] || {
+    printf '%s\n' "$output" >&2
+    fail "$name did not check installer executability with privileges"
+  }
   printf 'PASS: %s\n' "$name"
 }
 
 run_case readable-directory opensearch-dashboards-plugin yes 0
 run_case unreadable-directory opensearch-dashboards-plugin no 0
+run_case service-owner-only-installer opensearch-dashboards-plugin yes 0
 run_case differently-named-installer custom-dashboard-plugin yes 0
 run_case no-installer - yes 1
 

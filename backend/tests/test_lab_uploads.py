@@ -65,6 +65,7 @@ class LabUploadTests(unittest.TestCase):
         self.assertEqual(len(self.target.read_text().splitlines()), 4)
         rows = self.client.get("/api/lab/uploads", headers=self.headers()).get_json()["uploads"]
         self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["id"], rows[0]["upload_id"])
 
     def test_valid_ssh_sample_json_upload_succeeds(self):
         content = (Path(__file__).parents[1] / "lab_samples" / "ssh_bruteforce.log").read_text()
@@ -96,6 +97,21 @@ class LabUploadTests(unittest.TestCase):
         status = self.client.get("/api/lab/status", headers=self.headers()).get_json()
         self.assertTrue(status["wazuh_read_confirmed"], status["wazuh_read_reason"])
 
+    def test_read_confirmation_includes_recent_diagnostic_script_uploads(self):
+        response = self.client.post("/api/lab/uploads", headers=self.headers("upload-diagnostic"), json={
+            "filename": "ssh_bruteforce.log", "content": "sshd: Failed password from 192.0.2.44\n",
+            "title": "SSH upload diagnostic", "platform": "linux",
+        })
+        self.assertEqual(response.status_code, 201, response.get_json())
+        upload = response.get_json()["upload"]
+        self.alerts.write_text(json.dumps({
+            "timestamp": upload["uploaded_at"],
+            "location": str(self.target),
+            "rule": {"id": "5710"},
+        }) + "\n")
+        status = self.client.get("/api/lab/status", headers=self.headers()).get_json()
+        self.assertTrue(status["wazuh_read_confirmed"], status["wazuh_read_reason"])
+
     def test_upload_attempt_log_has_status_reason_and_id_without_content(self):
         secret_content = "synthetic-private-log-content"
         with self.assertLogs(logging.getLogger("app"), level="WARNING") as captured:
@@ -118,10 +134,14 @@ class LabUploadTests(unittest.TestCase):
         self.assertEqual(response.status_code, 500)
         self.assertIn("check backend service permissions", response.get_json()["message"])
 
-    def test_rejects_binary_null_public_ip_and_limits(self):
-        for value in (b"abc\x00def\n", b"\xff\xfe", b"GET / from 8.8.8.8\n"):
+    def test_rejects_binary_and_limits_but_redacts_public_ip(self):
+        for value in (b"abc\x00def\n", b"\xff\xfe"):
             with self.subTest(value=value):
                 self.assertEqual(self.upload(value).status_code, 400)
+        public_ip = b"Jan  1 00:00:00 host sshd: Failed login from 8.8.8.8\n"
+        self.assertEqual(self.upload(public_ip).status_code, 201)
+        self.assertIn("198.51.100.10", self.target.read_text())
+        self.assertNotIn("8.8.8.8", self.target.read_text())
         self.assertEqual(self.upload(b"x\n" * 2001).status_code, 400)
         self.assertEqual(self.upload(b"x" * (1024 * 1024 + 1)).status_code, 400)
 

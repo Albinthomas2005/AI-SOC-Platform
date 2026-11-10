@@ -64,11 +64,12 @@ export class WzRequest {
       const timeout = configuration ? configuration.timeout : 20000;
 
       const url = getHttp().basePath.prepend(path);
+      const isFormData = typeof FormData !== 'undefined' && payload instanceof FormData;
       const options = {
         method: method,
         headers: {
           ...PLUGIN_PLATFORM_REQUEST_HEADERS,
-          'content-type': 'application/json',
+          ...(!isFormData ? { 'content-type': 'application/json' } : {}),
           ...overwriteHeaders,
         },
         url: url,
@@ -104,11 +105,12 @@ export class WzRequest {
           }
         }
       }
+      const responseData = error?.response?.data || error?.data;
+      const responseError = typeof responseData?.error === 'string' ? responseData.error : '';
+      const responseMessage = typeof responseData?.message === 'string' ? responseData.message : '';
       const errorMessage =
-        (error &&
-          error.response &&
-          error.response.data &&
-          error.response.data.message) ||
+        (responseError && responseError !== 'Bad Request' && responseError) ||
+        (responseMessage && responseMessage !== 'Bad Request' && responseMessage) ||
         (error || {}).message;
       if (
         typeof errorMessage === 'string' &&
