@@ -148,6 +148,17 @@ class HuntingApiTests(unittest.TestCase):
         )
         self.assertEqual(no_user.status_code, 403)
 
+    def test_run_path_is_dashboard_only_not_a_flask_post_route(self):
+        response = self.client.post(
+            "/api/hunts/run",
+            json={"question": "synthetic question"},
+            headers=HEADERS,
+        )
+        # The all-in-one /run handler lives in the Dashboard plugin. Flask
+        # exposes /api/hunts/proposals and report persistence endpoints only.
+        self.assertEqual(response.status_code, 405)
+        self.assertIn("GET", response.headers.get("Allow", ""))
+
 
 if __name__ == "__main__":
     unittest.main()

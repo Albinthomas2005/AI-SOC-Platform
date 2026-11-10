@@ -48,7 +48,6 @@ function huntingBackendUrl(): string | undefined {
   const explicit = process.env.SOC_AI_BASE_URL?.trim();
   const host = process.env.SOC_AI_HOST?.trim();
   const port = process.env.SOC_AI_PORT?.trim();
-  if (!explicit && !host && !port) return undefined;
   const raw = explicit || `http://${host || '127.0.0.1'}:${port || '5000'}`;
   try {
     const parsed = new URL(raw);
