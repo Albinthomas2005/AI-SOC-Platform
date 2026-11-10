@@ -81,54 +81,13 @@ trap cleanup_temp EXIT
 
 is_executable_path() {
   local path="$1"
-  local path_dir
   local status
-  path_dir="$(dirname "$path")"
-  # os.access checks access for this process without probing candidate files
-  # through Bash conditionals. If the directory cannot be traversed/read, all
-  # candidate metadata checks are performed by sudo.
-  local directory_accessible
-  if directory_accessible="$(python3 - "$path_dir" <<'PY'
-import os
-import sys
-print("yes" if os.access(sys.argv[1], os.R_OK | os.X_OK) else "no")
-PY
-)"; then
-    :
-  else
-    status=$?
-    if [[ "$DEBUG" == "1" ]]; then
-      printf 'DEBUG: candidate %s; command: python3 os.access(%q, R_OK|X_OK); exit=%s\n' "$path" "$path_dir" "$status" >&2
-    fi
-    return 1
-  fi
+  local privilege="sudo"
+  (( EUID == 0 )) && privilege="root"
   if [[ "$DEBUG" == "1" ]]; then
-    printf 'DEBUG: candidate %s; command: python3 os.access(%q, R_OK|X_OK); exit=0 result=%s\n' "$path" "$path_dir" "$directory_accessible" >&2
+    printf 'DEBUG: candidate %s; command: %s test -x %q\n' "$path" "$privilege" "$path" >&2
   fi
-
-  if [[ "$directory_accessible" == "yes" ]]; then
-    if [[ "$DEBUG" == "1" ]]; then
-      printf 'DEBUG: candidate %s; command: [[ -x %q && -f %q ]]\n' "$path" "$path" "$path" >&2
-    fi
-    if [[ -x "$path" && -f "$path" ]]; then
-      status=0
-    else
-      status=$?
-    fi
-    if [[ "$DEBUG" == "1" ]]; then
-      printf 'DEBUG: candidate %s; command exit=%s\n' "$path" "$status" >&2
-    fi
-    (( status == 0 ))
-    return
-  fi
-
-  if [[ "$DEBUG" == "1" ]]; then
-    printf 'DEBUG: candidate %s; directory inaccessible; privileged checks only\n' "$path" >&2
-  fi
-  if [[ "$DEBUG" == "1" ]]; then
-    printf 'DEBUG: candidate %s; command: sudo test -x %q\n' "$path" "$path" >&2
-  fi
-  if sudo test -x "$path"; then
+  if run_privileged test -x "$path"; then
     status=0
   else
     status=$?
@@ -139,9 +98,9 @@ PY
   (( status == 0 )) || return 1
 
   if [[ "$DEBUG" == "1" ]]; then
-    printf 'DEBUG: candidate %s; command: sudo test -f %q\n' "$path" "$path" >&2
+    printf 'DEBUG: candidate %s; command: %s test -f %q\n' "$path" "$privilege" "$path" >&2
   fi
-  if sudo test -f "$path"; then
+  if run_privileged test -f "$path"; then
     status=0
   else
     status=$?

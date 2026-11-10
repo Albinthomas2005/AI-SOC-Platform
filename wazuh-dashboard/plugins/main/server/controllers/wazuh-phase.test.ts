@@ -11,6 +11,7 @@ const originalInternalToken = process.env.SOC_AI_INTERNAL_TOKEN;
 const originalBaseUrl = process.env.SOC_AI_BASE_URL;
 const originalHost = process.env.SOC_AI_HOST;
 const originalPort = process.env.SOC_AI_PORT;
+const originalUsernameMap = process.env.SOC_AI_USERNAME_MAP;
 
 const createContext = () => ({
   wazuh: {
@@ -29,6 +30,7 @@ describe('Wazuh phase proxy backend errors', () => {
     jest.clearAllMocks();
     process.env.SOC_AI_INTERNAL_TOKEN = 'synthetic-internal-token';
     process.env.SOC_AI_BASE_URL = 'http://127.0.0.1:5000';
+    delete process.env.SOC_AI_USERNAME_MAP;
   });
 
   afterAll(() => {
@@ -43,6 +45,8 @@ describe('Wazuh phase proxy backend errors', () => {
     else process.env.SOC_AI_HOST = originalHost;
     if (originalPort === undefined) delete process.env.SOC_AI_PORT;
     else process.env.SOC_AI_PORT = originalPort;
+    if (originalUsernameMap === undefined) delete process.env.SOC_AI_USERNAME_MAP;
+    else process.env.SOC_AI_USERNAME_MAP = originalUsernameMap;
   });
 
   it.each([
@@ -60,13 +64,24 @@ describe('Wazuh phase proxy backend errors', () => {
     expect(result).toEqual({ statusCode, body: { ok: false, error: message, message } });
   });
 
+  it('maps the authenticated Dashboard username to the configured SOC database identity', async () => {
+    process.env.SOC_AI_USERNAME_MAP = '{"analyst":"soc-l2-analyst"}';
+    needle.mockResolvedValue({ statusCode: 200, body: { ok: true } });
+    await controller.proxy(createContext(), {} as any, createResponse() as any, 'get', '/api/incidents');
+
+    expect(needle).toHaveBeenCalledWith(
+      'get', expect.stringContaining('/api/incidents'), {},
+      expect.objectContaining({ headers: expect.objectContaining({ 'X-SOC-User': 'soc-l2-analyst' }) }),
+    );
+  });
+
   it('supplies a fallback message when a non-2xx backend response has no body', async () => {
     needle.mockResolvedValue({ statusCode: 500, body: undefined });
     const response = createResponse();
 
     const result = await controller.proxy(
-      createContext(), {} as any, response as any, 'post', '/api/lab/uploads',
-      { filename: 'sample.log', content: 'synthetic', title: 'sample', platform: 'linux' },
+      createContext(), {} as any, response as any, 'post', '/api/incidents',
+      { title: 'synthetic', severity: 'low' },
     );
 
     expect(result).toEqual({
@@ -74,8 +89,8 @@ describe('Wazuh phase proxy backend errors', () => {
       body: { ok: false, error: 'Backend returned HTTP 500', message: 'Backend returned HTTP 500' },
     });
     expect(needle).toHaveBeenCalledWith(
-      'post', expect.stringContaining('/api/lab/uploads'),
-      { filename: 'sample.log', content: 'synthetic', title: 'sample', platform: 'linux' },
+      'post', expect.stringContaining('/api/incidents'),
+      { title: 'synthetic', severity: 'low' },
       expect.any(Object),
     );
   });
@@ -134,7 +149,7 @@ describe('Wazuh phase proxy backend errors', () => {
   it('returns a message and build header when the raw upload body exceeds its limit', async () => {
     const response = createResponse();
     const result = await controller.uploadLab(
-      createContext(), { body: Buffer.alloc(1024 * 1024 + 64 * 1024 + 1) } as any, response as any,
+      createContext(), { body: Buffer.alloc(2 * 1024 * 1024 + 1) } as any, response as any,
     );
 
     expect(result.statusCode).toBe(413);

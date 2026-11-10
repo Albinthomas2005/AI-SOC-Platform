@@ -130,6 +130,13 @@ class RolesAndAuditTests(unittest.TestCase):
         response = self.client.get("/api/admin/audit")
         self.assertEqual(response.status_code, 401)
 
+    def test_incidents_and_audit_forbid_missing_or_insufficient_soc_roles(self):
+        unknown_user = self.headers("dashboard-user-without-soc-record")
+        self.assertEqual(self.client.get("/api/incidents", headers=unknown_user).status_code, 403)
+        self.assertEqual(self.client.get("/api/admin/audit", headers=unknown_user).status_code, 403)
+        self.assertEqual(self.client.get("/api/incidents", headers=self.headers("test-l1")).status_code, 403)
+        self.assertEqual(self.client.get("/api/admin/audit", headers=self.headers("test-l3")).status_code, 403)
+
     def test_every_api_and_training_route_rejects_missing_and_wrong_tokens(self):
         import re
 

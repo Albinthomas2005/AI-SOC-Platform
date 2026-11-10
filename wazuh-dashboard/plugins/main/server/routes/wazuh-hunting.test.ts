@@ -7,6 +7,9 @@ jest.mock('needle', () => jest.fn());
 const needle = require('needle') as jest.Mock;
 const controller = new WazuhHuntingCtrl();
 const originalToken = process.env.SOC_AI_INTERNAL_TOKEN;
+const originalBaseUrl = process.env.SOC_AI_BASE_URL;
+const originalHost = process.env.SOC_AI_HOST;
+const originalPort = process.env.SOC_AI_PORT;
 const query = {
   index: 'wazuh-alerts-4.x-*',
   size: 10,
@@ -38,6 +41,7 @@ describe('POST /api/hunts/run executes only validated proposals as current user'
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.SOC_AI_INTERNAL_TOKEN = 'synthetic-hunt-token';
+    process.env.SOC_AI_BASE_URL = 'http://127.0.0.1:5000';
     needle
       .mockResolvedValueOnce({ statusCode: 201, body: { ok: true, hunt_id: 'a'.repeat(32), proposal } })
       .mockResolvedValueOnce({ statusCode: 200, body: { ok: true, interpretation: 'Cites alert-1', result_count: 1 } });
@@ -46,6 +50,32 @@ describe('POST /api/hunts/run executes only validated proposals as current user'
   afterAll(() => {
     if (originalToken === undefined) delete process.env.SOC_AI_INTERNAL_TOKEN;
     else process.env.SOC_AI_INTERNAL_TOKEN = originalToken;
+    if (originalBaseUrl === undefined) delete process.env.SOC_AI_BASE_URL;
+    else process.env.SOC_AI_BASE_URL = originalBaseUrl;
+    if (originalHost === undefined) delete process.env.SOC_AI_HOST;
+    else process.env.SOC_AI_HOST = originalHost;
+    if (originalPort === undefined) delete process.env.SOC_AI_PORT;
+    else process.env.SOC_AI_PORT = originalPort;
+  });
+
+  it('uses the loopback backend default when no backend URL variables are set', async () => {
+    delete process.env.SOC_AI_BASE_URL;
+    delete process.env.SOC_AI_HOST;
+    delete process.env.SOC_AI_PORT;
+    needle.mockReset()
+      .mockResolvedValueOnce({ statusCode: 201, body: { ok: true, hunt_id: 'a'.repeat(32), proposal } })
+      .mockResolvedValueOnce({ statusCode: 200, body: { ok: true, interpretation: 'Cites alert-1', result_count: 1 } });
+
+    const result = await controller.runHunt(
+      createContext(), { body: { question: 'Find repeated SSH failures.' } } as any,
+      createResponse() as any,
+    );
+
+    expect(result.statusCode).toBe(200);
+    expect(needle.mock.calls.map(call => call[1])).toEqual([
+      'http://127.0.0.1:5000/api/hunts/proposals',
+      `http://127.0.0.1:5000/api/hunts/${'a'.repeat(32)}/results`,
+    ]);
   });
 
   it('proposes, searches as the signed-in user, and saves the resulting report', async () => {

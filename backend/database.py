@@ -39,12 +39,6 @@ def init_db():
                 wazuh_id TEXT PRIMARY KEY
             )
         """)
-        connection.execute("""
-            CREATE TABLE IF NOT EXISTS lab_uploads (
-                upload_id TEXT PRIMARY KEY, username TEXT NOT NULL, title TEXT NOT NULL,
-                platform TEXT NOT NULL, line_count INTEGER NOT NULL, uploaded_at TEXT NOT NULL
-            )
-        """)
 
         # Store original Wazuh alert JSON for the dashboard.
         connection.execute("""

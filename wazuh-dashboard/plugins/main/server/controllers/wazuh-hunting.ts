@@ -3,6 +3,7 @@ import {
   RequestHandlerContext,
   OpenSearchDashboardsResponseFactory,
 } from 'src/core/server';
+import { socAiUsername } from '../lib/soc-ai-identity';
 
 type NeedleOptions = {
   json: boolean;
@@ -28,9 +29,6 @@ type NeedlePost = (
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const needle = require('needle') as NeedlePost;
 
-const AI_BASE_URL = `http://${process.env.SOC_AI_HOST || '127.0.0.1'}:${process.env.SOC_AI_PORT || '5000'}`;
-const HUNT_PROPOSAL_URL = `${AI_BASE_URL}/api/hunts/proposals`;
-const HUNT_RESULTS_URL = `${AI_BASE_URL}/api/hunts`;
 const INTERNAL_TOKEN = () => process.env.SOC_AI_INTERNAL_TOKEN;
 const HUNT_SIZE_LIMIT = 100;
 const HUNT_TIMEOUT_MS = 45000;
@@ -45,6 +43,20 @@ const HUNT_QUERY_FIELDS = new Set([
   ...HUNT_FIELDS, 'agent.name', 'data.srcuser', 'data.dstuser',
 ]);
 const HUNT_CLAUSES = new Set(['bool', 'match', 'term', 'range', 'exists']);
+
+function huntingBackendUrl(): string | undefined {
+  const explicit = process.env.SOC_AI_BASE_URL?.trim();
+  const host = process.env.SOC_AI_HOST?.trim();
+  const port = process.env.SOC_AI_PORT?.trim();
+  const raw = explicit || `http://${host || '127.0.0.1'}:${port || '5000'}`;
+  try {
+    const parsed = new URL(raw);
+    if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password || parsed.search || parsed.hash || (parsed.pathname !== '/' && parsed.pathname !== '')) return undefined;
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return undefined;
+  }
+}
 
 function isObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -112,21 +124,25 @@ export class WazuhHuntingCtrl {
     try {
       const currentUser = await context.wazuh.security.getCurrentUser(request, context);
       if (!currentUser || typeof currentUser.username !== 'string') throw new Error('unauthenticated');
-      username = currentUser.username;
+      const mappedUsername = socAiUsername(currentUser.username);
+      if (!mappedUsername) throw new Error('invalid user mapping');
+      username = mappedUsername;
     } catch {
       return response.custom({ statusCode: 401, body: { ok: false, error: 'Authentication required' } });
     }
 
     const token = INTERNAL_TOKEN();
+    const baseUrl = huntingBackendUrl();
     const question = (request.body || {}).question;
     if (!token) return response.custom({ statusCode: 503, body: { ok: false, error: 'Hunting service is unavailable' } });
+    if (!baseUrl) return response.custom({ statusCode: 503, body: { ok: false, error: 'Hunting backend URL is unavailable' } });
     if (typeof question !== 'string' || !question.trim() || question.length > 2000) {
       return response.custom({ statusCode: 400, body: { ok: false, error: 'A hunting question is required' } });
     }
 
     let proposalResponse: NeedleResponse;
     try {
-      proposalResponse = await needle('post', HUNT_PROPOSAL_URL, { question: question.trim() }, {
+      proposalResponse = await needle('post', `${baseUrl}/api/hunts/proposals`, { question: question.trim() }, {
         json: true,
         headers: { Authorization: `Bearer ${token}`, 'X-SOC-User': username },
         // eslint-disable-next-line camelcase
@@ -178,7 +194,7 @@ export class WazuhHuntingCtrl {
       ? hits.slice(0, proposal.query.size).map((hit: any) => ({ _id: hit?._id, _source: hit?._source }))
       : [];
     try {
-      const saved = await needle('post', `${HUNT_RESULTS_URL}/${huntId}/results`, { results }, {
+      const saved = await needle('post', `${baseUrl}/api/hunts/${huntId}/results`, { results }, {
         json: true,
         headers: { Authorization: `Bearer ${token}`, 'X-SOC-User': username },
         // eslint-disable-next-line camelcase

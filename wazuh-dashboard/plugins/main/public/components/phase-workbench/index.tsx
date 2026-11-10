@@ -19,14 +19,6 @@ export const PhaseWorkbench: React.FC = () => {
   const [labOnly, setLabOnly] = useState(false);
   const [hiddenAlerts, setHiddenAlerts] = useState(0);
 
-  React.useEffect(() => {
-    let active = true;
-    WzRequest.genericReq('GET', '/api/phase/lab/status', undefined, { shouldRetry: false, checkCurrentApiIsUp: false })
-      .then((response: any) => { if (active && response?.data?.uploads_exist) setLabOnly(true); })
-      .catch(() => {});
-    return () => { active = false; };
-  }, []);
-
   const call = async (method: string, path: string, body?: any) => {
     setError('');
     setResult(undefined);
@@ -63,7 +55,10 @@ export const PhaseWorkbench: React.FC = () => {
     if (tab === 2 && alert_refs) await call('POST', '/api/phase/threat-intel/lookup', { alert_refs });
     if (tab === 3) await call('POST', '/api/hunts/run', { question });
     if (tab === 4) await call('GET', '/api/phase/admin/audit');
-    if (tab === 5) await call('POST', '/api/phase/assistant/chat', { question, evidence_refs: parseRefs() });
+    if (tab === 5 && alert_refs) {
+      const evidence = alert_refs.map((reference: any) => ({ type: 'alert', id: reference.id }));
+      await call('POST', '/api/phase/assistant/chat', { question, evidence });
+    }
     if (tab === 1) await loadIncidents();
   };
   const createIncident = async () => {
