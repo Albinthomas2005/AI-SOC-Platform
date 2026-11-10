@@ -90,17 +90,12 @@ The shared tab is registered for Threat Hunting, Malware Detection Events, MITRE
 
 The historical audit found that the analyze controller dropped the ID and had no decision controls. Phase 1 changes the selected-alert tab to request a stored report and send edit/approve/reject decisions through the protected Dashboard and backend routes. The browser test is written, not run.
 
-### AI SOC Dashboard and Generate Report
-
-The page is registered at `/ai-soc-dashboard` and added to navigation ([`wazuh-dashboard/plugins/main/public/app-router.tsx:97`](../wazuh-dashboard/plugins/main/public/app-router.tsx); [`wazuh-dashboard/plugins/main/public/applications.ts:165–183`](../wazuh-dashboard/plugins/main/public/applications.ts)). It queries recent Threat Hunting data ([`wazuh-dashboard/plugins/main/public/components/ai-soc-dashboard/use-ai-soc-overview.ts:25–96`](../wazuh-dashboard/plugins/main/public/components/ai-soc-dashboard/use-ai-soc-overview.ts)) and maps overview data in [`wazuh-dashboard/plugins/main/public/components/ai-soc-dashboard/data.ts:82–132`](../wazuh-dashboard/plugins/main/public/components/ai-soc-dashboard/data.ts). Generate Report fetches the selected alert through the server path and the page displays the unverified label and analyst decision controls ([`wazuh-dashboard/plugins/main/server/controllers/wazuh-ai.ts:351–552`](../wazuh-dashboard/plugins/main/server/controllers/wazuh-ai.ts); [`wazuh-dashboard/plugins/main/public/components/ai-soc-dashboard/index.tsx:319–420`](../wazuh-dashboard/plugins/main/public/components/ai-soc-dashboard/index.tsx)).
-
 Potential runtime failure points, **not verified on an installed Dashboard**:
 
 - Backend must be reachable at loopback `SOC_AI_PORT` (default `5000`) and the Dashboard service must receive the matching internal token.
 - The selected user's OpenSearch permissions and index pattern must allow alert searches; 403/404 handling exists, but actual role mappings were not exercised ([`wazuh-ai.ts:247–296`](../wazuh-dashboard/plugins/main/server/controllers/wazuh-ai.ts)).
 - Dashboard and backend allowlists must remain aligned; a field omitted at either layer will not reach analysis.
 - The new selected-alert report/review flow is covered by a browser test that is written, not run.
-- The AI SOC page's approval/edit/reject controls appear in source; only a subset of interactions is covered by test names, and no built plugin behavior was verified.
 - Plugin compatibility is pinned in source to Wazuh Dashboard 4.14.9 and OSD 2.19.6 ([`wazuh-dashboard/VERSION.json:2`](../wazuh-dashboard/VERSION.json); [`wazuh-dashboard/plugins/main/package.json:3–6`](../wazuh-dashboard/plugins/main/package.json)). The build workflow's manual trigger and optional checks limit automatic validation.
 
 The existing generic visualization export button is a separate ReportingService flow, not an AI report export ([`wazuh-dashboard/plugins/main/public/components/modules/buttons/generate_report.tsx:25–79`](../wazuh-dashboard/plugins/main/public/components/modules/buttons/generate_report.tsx)).

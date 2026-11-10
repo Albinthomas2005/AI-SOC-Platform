@@ -39,7 +39,6 @@ from hunting import register_hunting_routes
 from roles_audit import enforce_route_access, register_admin_routes
 from retention import register_retention_routes
 from assistant import register_assistant_routes
-from lab_uploads import register_lab_routes
 from groq_service import (
     explain_alert,
     generate_investigation_report,
@@ -71,14 +70,6 @@ SAFE_FAILURES = {
 @app.before_request
 def assign_request_id():
     g.request_id = uuid.uuid4().hex
-    if request.method == "POST" and (
-        request.path == "/api/lab/uploads" or request.path.startswith("/api/lab/samples/")
-    ):
-        g.lab_upload_id = uuid.uuid4().hex
-        logger.warning(
-            "Lab upload attempt status=received reason=request_received upload_id=%s",
-            g.lab_upload_id,
-        )
 
 
 @app.after_request
@@ -110,7 +101,6 @@ def handle_request_too_large(error):
     if request.path in (
         "/api/ai/analyze-alert",
         "/api/ai/generate-report",
-        "/api/lab/uploads",
     ):
         message = (
             "Report request is too large"
@@ -186,7 +176,6 @@ register_hunting_routes(app, has_valid_internal_token)
 register_admin_routes(app, has_valid_internal_token)
 register_retention_routes(app, has_valid_internal_token)
 register_assistant_routes(app, has_valid_internal_token)
-register_lab_routes(app)
 
 
 @app.route("/api/threat-intel/lookup", methods=["POST"])

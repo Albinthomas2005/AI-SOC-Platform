@@ -1,2 +1,0 @@
-Nov  9 10:15:00 lab-linux sudo[2301]: analyst : TTY=pts/0 ; PWD=/home/analyst ; USER=root ; COMMAND=/usr/bin/id
-Nov  9 10:15:00 lab-linux sudo[2301]: pam_unix(sudo:session): session opened for user root(uid=0) by analyst(uid=1000)

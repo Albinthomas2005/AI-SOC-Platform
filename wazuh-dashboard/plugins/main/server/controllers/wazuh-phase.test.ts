@@ -75,30 +75,13 @@ describe('Wazuh phase proxy backend errors', () => {
     );
   });
 
-  it('uses the loopback backend default when no backend URL variables are set', async () => {
-    delete process.env.SOC_AI_BASE_URL;
-    delete process.env.SOC_AI_HOST;
-    delete process.env.SOC_AI_PORT;
-    needle.mockResolvedValue({ statusCode: 200, body: { ok: true, uploads: [], samples: [] } });
-
-    for (const path of ['/api/lab/status', '/api/lab/uploads', '/api/lab/samples']) {
-      await controller.proxy(createContext(), {} as any, createResponse() as any, 'get', path);
-    }
-
-    expect(needle.mock.calls.map(call => call[1])).toEqual([
-      'http://127.0.0.1:5000/api/lab/status',
-      'http://127.0.0.1:5000/api/lab/uploads',
-      'http://127.0.0.1:5000/api/lab/samples',
-    ]);
-  });
-
   it('supplies a fallback message when a non-2xx backend response has no body', async () => {
     needle.mockResolvedValue({ statusCode: 500, body: undefined });
     const response = createResponse();
 
     const result = await controller.proxy(
-      createContext(), {} as any, response as any, 'post', '/api/lab/uploads',
-      { filename: 'sample.log', content: 'synthetic', title: 'sample', platform: 'linux' },
+      createContext(), {} as any, response as any, 'post', '/api/incidents',
+      { title: 'synthetic', severity: 'low' },
     );
 
     expect(result).toEqual({
@@ -106,32 +89,9 @@ describe('Wazuh phase proxy backend errors', () => {
       body: { ok: false, error: 'Backend returned HTTP 500', message: 'Backend returned HTTP 500' },
     });
     expect(needle).toHaveBeenCalledWith(
-      'post', expect.stringContaining('/api/lab/uploads'),
-      { filename: 'sample.log', content: 'synthetic', title: 'sample', platform: 'linux' },
+      'post', expect.stringContaining('/api/incidents'),
+      { title: 'synthetic', severity: 'low' },
       expect.any(Object),
-    );
-  });
-
-  it('forwards multipart uploads with their original boundary and signed-in identity', async () => {
-    const multipart = Buffer.from('--sample-boundary\r\nContent-Disposition: form-data; name="title"\r\n\r\nSynthetic upload\r\n--sample-boundary--\r\n');
-    needle.mockResolvedValue({ statusCode: 201, body: { ok: true, upload: { id: 'synthetic-id' } } });
-    const result = await controller.uploadLab(
-      createContext(),
-      { body: multipart, headers: { 'content-type': 'multipart/form-data; boundary=sample-boundary' } } as any,
-      createResponse() as any,
-    );
-
-    expect(result.statusCode).toBe(201);
-    expect(needle).toHaveBeenCalledWith(
-      'post', expect.stringContaining('/api/lab/uploads'), multipart,
-      expect.objectContaining({
-        json: false,
-        headers: expect.objectContaining({
-          Authorization: 'Bearer synthetic-internal-token',
-          'X-SOC-User': 'analyst',
-          'Content-Type': 'multipart/form-data; boundary=sample-boundary',
-        }),
-      }),
     );
   });
 

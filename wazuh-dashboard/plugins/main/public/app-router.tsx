@@ -1,8 +1,6 @@
 import React, { useEffect } from 'react';
-import { aiSocDashboardRoute } from './components/ai-soc-dashboard/route';
 import { TrainingPageApp } from './components/training/training-page-boundary';
 import { PhaseWorkbench } from './components/phase-workbench';
-import { LabUploads } from './components/lab-uploads';
 import { Router, Route, Switch, Redirect } from 'react-router-dom';
 import { ToolsRouter } from './components/tools/tools-router';
 import { getWazuhCorePlugin, getWzMainParams } from './kibana-services';
@@ -93,10 +91,8 @@ export function Application(props) {
           component={WzManagement}
         ></Route>
         <Route path={`/${SECTIONS.OVERVIEW}`} exact component={Overview}></Route>
-        {aiSocDashboardRoute}
         <Route path='/training' exact component={TrainingPageApp}></Route>
         <Route path='/phase-workbench' exact component={PhaseWorkbench}></Route>
-        <Route path='/lab-uploads' exact component={LabUploads}></Route>
         <Route path={`/${SECTIONS.SETTINGS}`} exact component={Settings}></Route>
         <Route path={`/${SECTIONS.SECURITY}`} exact component={WzSecurity}></Route>
         <Route

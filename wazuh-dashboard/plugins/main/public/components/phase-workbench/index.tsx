@@ -19,14 +19,6 @@ export const PhaseWorkbench: React.FC = () => {
   const [labOnly, setLabOnly] = useState(false);
   const [hiddenAlerts, setHiddenAlerts] = useState(0);
 
-  React.useEffect(() => {
-    let active = true;
-    WzRequest.genericReq('GET', '/api/phase/lab/status', undefined, { shouldRetry: false, checkCurrentApiIsUp: false })
-      .then((response: any) => { if (active && response?.data?.uploads_exist) setLabOnly(true); })
-      .catch(() => {});
-    return () => { active = false; };
-  }, []);
-
   const call = async (method: string, path: string, body?: any) => {
     setError('');
     setResult(undefined);
