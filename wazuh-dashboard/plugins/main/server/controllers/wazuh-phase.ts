@@ -20,7 +20,7 @@ type NeedleCall = (method: string, url: string, data: unknown, options: NeedleOp
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const needle = require('needle') as NeedleCall;
 const UPLOAD_BUILD = 'upload-diagnose-1';
-const UPLOAD_REQUEST_MAX_BYTES = 1024 * 1024 + 64 * 1024;
+const UPLOAD_REQUEST_MAX_BYTES = 2 * 1024 * 1024;
 const TIMEOUT_MS = 45000;
 const ALERT_FIELDS = [
   '@timestamp', 'timestamp', 'rule.id', 'rule.level', 'rule.description',
@@ -64,7 +64,6 @@ function backendUrl(): string | undefined {
   const explicit = process.env.SOC_AI_BASE_URL?.trim();
   const host = process.env.SOC_AI_HOST?.trim();
   const port = process.env.SOC_AI_PORT?.trim();
-  if (!explicit && !host && !port) return undefined;
   const raw = explicit || `http://${host || '127.0.0.1'}:${port || '5000'}`;
   try {
     const parsed = new URL(raw);

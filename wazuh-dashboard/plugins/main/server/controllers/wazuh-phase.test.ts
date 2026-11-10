@@ -75,6 +75,23 @@ describe('Wazuh phase proxy backend errors', () => {
     );
   });
 
+  it('uses the loopback backend default when no backend URL variables are set', async () => {
+    delete process.env.SOC_AI_BASE_URL;
+    delete process.env.SOC_AI_HOST;
+    delete process.env.SOC_AI_PORT;
+    needle.mockResolvedValue({ statusCode: 200, body: { ok: true, uploads: [], samples: [] } });
+
+    for (const path of ['/api/lab/status', '/api/lab/uploads', '/api/lab/samples']) {
+      await controller.proxy(createContext(), {} as any, createResponse() as any, 'get', path);
+    }
+
+    expect(needle.mock.calls.map(call => call[1])).toEqual([
+      'http://127.0.0.1:5000/api/lab/status',
+      'http://127.0.0.1:5000/api/lab/uploads',
+      'http://127.0.0.1:5000/api/lab/samples',
+    ]);
+  });
+
   it('supplies a fallback message when a non-2xx backend response has no body', async () => {
     needle.mockResolvedValue({ statusCode: 500, body: undefined });
     const response = createResponse();
@@ -172,7 +189,7 @@ describe('Wazuh phase proxy backend errors', () => {
   it('returns a message and build header when the raw upload body exceeds its limit', async () => {
     const response = createResponse();
     const result = await controller.uploadLab(
-      createContext(), { body: Buffer.alloc(1024 * 1024 + 64 * 1024 + 1) } as any, response as any,
+      createContext(), { body: Buffer.alloc(2 * 1024 * 1024 + 1) } as any, response as any,
     );
 
     expect(result.statusCode).toBe(413);
